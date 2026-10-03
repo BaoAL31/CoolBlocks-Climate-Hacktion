@@ -1,13 +1,13 @@
-## Pair an agent with your app
-
-Open CoolBlocks and copy the six-character code from **Connect Agent**. Call `connect_to_app(connection_code="ABC234")`. That MCP connection now remembers the exact browser session: subsequent scene tools can omit `session_id`. An explicit `session_id` still works for independent scenarios.
-
-Codes expire after ten minutes. Each tab gets an independent session. Pairing requires a live WebSocket connection. Reloading the page creates a new session and code; reconnect the agent. Pairing is scoped to each stateful MCP connection, never a shared global target. Reinitializing MCP requires pairing again. The frontend reconnects its socket automatically and retains HTTP polling as a fallback. This local demo has no authenticated user/project accounts yet; pairing codes identify transient browser sessions.
-
 # CoolBlocks MCP
 
 External agents can understand the current map and use the same physics tools as
 the browser. There is no in-app chat, model provider or model API key requirement.
+
+## Pair an agent with your app
+
+Open CoolBlocks, click the plug icon left of **Try an example**, and copy the six-character code from the panel. The icon tooltip is **Connect an agent**. The panel closes with Escape, its close button, or a click outside. Call `connect_to_app(connection_code="ABC234")`. That MCP connection now remembers the exact browser session: subsequent scene tools can omit `session_id`. An explicit `session_id` still works for independent scenarios.
+
+Codes expire after ten minutes. Each tab gets an independent session. Pairing requires a live WebSocket connection. Reloading the page creates a new session and code; reconnect the agent. Pairing is scoped to each stateful MCP connection, never a shared global target. Reinitializing MCP requires pairing again. The frontend reconnects its socket automatically and retains HTTP polling as a fallback. This local demo has no authenticated user/project accounts yet; pairing codes identify transient browser sessions.
 
 ## Run and connect
 
@@ -15,6 +15,7 @@ From the repository root in Windows PowerShell:
 
 ```powershell
 cd backend
+python -m venv .venv  # First setup only; Python 3.11-3.13
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -X utf8 -m uvicorn server:app --host 127.0.0.1 --port 8000
 ```
@@ -45,10 +46,13 @@ including entering the MCP session manager in the parent application's lifespan.
 
 ## Tools and context
 
+All 27 tools are listed below. After pairing, `session_id` is optional on scene tools.
+
 | Tool | Purpose |
 | --- | --- |
+| `connect_to_app` | Pair this MCP connection to the exact live tab using `connection_code` |
 | `get_status` | CPU/GPU backend, active calculation, elapsed time, queued requests |
-| `list_sessions` | Discover scenes and identify connected browser sessions |
+| `list_sessions` | List scenes for diagnostics; never guess which tab the user wants |
 | `get_scene` | Selected date/hour/point, map center, draft edits, baseline and scenario metrics |
 | `create_scene` | Create an independent agent scenario when no browser is open |
 | `set_time` | Change local date/hour and clear stale results |
@@ -80,9 +84,10 @@ source assumptions and fallback weather remain explicit.
 
 Typical agent workflow:
 
-1. Call `get_status`, `get_area`, and `list_sessions`.
-2. Choose the user's browser session, then call `get_scene`. If working independently,
-   use `create_scene` and the returned session ID instead.
+1. Call `connect_to_app` with the code supplied by the user.
+2. Read `get_scene`, `get_status` and `get_area`. If working independently,
+   use `create_scene` and pass its returned `session_id` to subsequent tools. This does not retarget
+   your paired browser connection.
 3. Read `get_area_state` for the selected hour. Follow `next_offset` to read the whole area, compare temperature
    distributions with shade, canopy and surfaces, and refine a bounding box to smaller cells for local detail.
    Each cell reports exact maximum-pixel coordinates, so the agent can locate the hottest ground point from the
@@ -109,7 +114,7 @@ Example draft tree (coordinates must be inside the study area and off roofs):
 
 ```json
 {
-  "session_id": "<from list_sessions or create_scene>",
+  "session_id": "<user-supplied session ID or create_scene; omit when paired>",
   "edits": [{
     "type": "add_tree",
     "geometry": { "type": "Point", "coordinates": [151.187, -33.888] },
@@ -123,12 +128,81 @@ Use valid GeoJSON Polygons for surface/building/removal edits, `surface` for gro
 changes, and `height` for buildings (`0` means hypothetical demolition).
 Simulation hours are 9–18, defaulting to the selected hour.
 
-Browser scenes synchronize once per second after the maps initialize. If the user
+Browser scenes publish local changes once per second after the maps initialize. Agent actions
+are delivered through the session WebSocket, with HTTP polling as a reconnect fallback. If the user
 changes the scene while a calculation is running, the tool rejects its stale result
 instead of overwriting the user's work. Drafts and results are held in server memory
 and disappear on restart. Session IDs identify tabs, not authenticated users.
 Simulations are serialized across browser and MCP calls because their working
 directories and native GPU context are shared. Source area rasters are never edited.
+
+## Example tool calls
+
+These are MCP tool calls made by your agent, not shell commands. Substitute values
+from the current scene and actual features; coordinates are longitude, latitude.
+
+```text
+connect_to_app(connection_code="ABC234")
+get_scene()
+get_area_state(cell_size_m=200, limit=64)
+```
+
+Follow `next_offset` until it is null. Compare every cell's
+`hours[].maximum_ground_point.utci` at the selected hour; the highest value's
+`lon` and `lat` identify the hottest ground pixel. For detailed interpretation,
+request a smaller bounding box and finer cells. Then:
+
+```text
+place_temperature_marker(lon=<measured longitude>, lat=<measured latitude>, view="heat")
+add_tree(lon=<same longitude>, lat=<same latitude>, size="medium")
+run_simulation()  # Selected hour; or hours=[12, 15, 18]
+place_temperature_marker(lon=<same longitude>, lat=<same latitude>, view="heat")
+```
+
+For a building, retrieve its footprint and ID first:
+
+```text
+get_features(kind="buildings", limit=20, offset=0)
+set_building_height(building_id=<returned building ID>, height=20)
+run_simulation()
+undo_edit()
+remove_building(building_id=<returned building ID>)
+run_simulation()
+undo_edit()
+```
+
+Use `get_features(kind="trees")` for existing tree IDs and `get_scene` for draft
+IDs. `remove_tree(tree_id=...)` removes a modelled crown; `remove_trees(geometry=...)`
+removes canopy in a polygon. Polygon tools accept GeoJSON Polygon/MultiPolygon
+objects, with closed rings in longitude/latitude. `change_surface` accepts
+`paving`, `asphalt`, `grass`, `soil`, `water`, or `cool_asphalt`. Building heights
+are metres, and tree sizes are `small` (6m), `medium` (10m), or `large` (15m).
+
+`set_time(date="2025-12-19", hour=15)` selects Sydney local time.
+`set_map_view(map_view="heat", heat_mode="change", show_shade=True)` changes display
+settings. `set_camera` accepts `lon`, `lat`, and optional `zoom`, `pitch`, `bearing`.
+`select_tool` chooses `pan`, `probe`, `tree`, `remove_trees`, `surface`, `building`,
+or `demolish`, with optional tree-size, surface-type and building-height settings.
+
+## Troubleshooting
+
+- **Pairing tool missing:** refresh/reconnect your client's MCP connection so it
+  rediscovers the tools. The endpoint must end in `/mcp/`.
+- **Invalid or expired code:** reopen the plug panel and copy the current code.
+  Codes last ten minutes; reloading the page creates a different session.
+- **App session offline:** leave the exact paired tab open and wait for the panel
+  to show that the app is online, then pair again.
+- **Agent asks for a session ID after pairing:** the MCP connection may have been
+  reinitialized. Pair again; its remembered target is scoped to that connection.
+- **Changes not visible:** read `get_scene`. A nonzero `pending_browser_actions`
+  means the browser has not acknowledged the action yet. Reconnect its tab.
+- **Temperatures unchanged after an edit:** run `run_simulation`; drafts alone do
+  not update computed temperatures. Use the selected hour covered by that run.
+- **Results expired or stale:** simulation caches and scenes are held in memory.
+  Rerun the simulation; backend restarts require a new pairing. A human edit made
+  during a calculation can invalidate its result.
+- **Open a page:** CoolBlocks MCP controls an existing app session; it has no tool
+  to launch a browser. Open the app URL yourself, then share the pairing code.
 
 ## Validation
 

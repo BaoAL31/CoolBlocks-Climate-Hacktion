@@ -69,17 +69,62 @@ pip install -r requirements.txt
 uvicorn server:app --reload
 # open http://127.0.0.1:8000  (app)   or   http://127.0.0.1:8000/docs  (API)
 ```
+On Windows PowerShell, use this instead of `source`:
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -X utf8 -m uvicorn server:app --host 127.0.0.1 --port 8000
+```
+
+This uses the virtual environment directly, so activation is optional.
+
 The real USYD area data is in the repo (`backend/data/`), so it works straight after cloning. On the first start the
 server builds the tree-height map from the canopy file (a second or two). Without area data it falls back to a
 **synthetic demo block**.
 
-### External agents and MCP
+### Control CoolBlocks with an MCP agent
 
-External agents can inspect the current map, weather, temperatures and shade,
-stage hypothetical edits and run before/after simulations. Connect to
-`http://127.0.0.1:8000/mcp/` after starting the app. No model API key or in-app chat
-is required. See [MCP setup and tool guide](MCP.md) for HTTP/stdio connections,
-scene synchronization and example workflows.
+CoolBlocks exposes **27 MCP tools** for reading the area and using its editing and
+simulation features. No model API key or in-app chat is required.
+
+1. Start the backend and open [the local app](http://127.0.0.1:8000/).
+2. Add `http://127.0.0.1:8000/mcp/` to your agent's MCP connections
+   (Streamable HTTP). Refresh the connection after installing new tools.
+3. Click the **plug icon**, left of **Try an example**, to reveal the pairing code.
+   The panel stays hidden during normal map use.
+4. Tell your agent: **"Connect to ABC234"**, using your actual six-character code.
+   It calls `connect_to_app(connection_code="ABC234")` to pair with that exact tab.
+5. Ask it to inspect or edit the map. After pairing, scene tools can omit `session_id`.
+
+For example:
+
+- "What date and hour is this map showing?"
+- "Read the area, find the hottest ground point, and place a temperature marker there."
+- "Plant a medium tree at that marker, simulate, and show the before/after temperature."
+- "Remove this building, simulate the changes, then undo the removal."
+
+| Available features | MCP tools |
+| --- | --- |
+| Pairing and scene state | `connect_to_app`, `get_scene`, `create_scene`, `list_sessions` |
+| Read the area, buildings, canopy, heat and weather | `get_area`, `get_features`, `get_area_state`, `get_weather`, `get_status` |
+| Temperature and simulations | `get_baseline`, `inspect_point`, `place_temperature_marker`, `run_simulation` |
+| Plant/remove trees | `add_tree`, `remove_tree`, `remove_trees` |
+| Add, resize or demolish buildings | `add_building`, `set_building_height`, `remove_building` |
+| Change ground surfaces | `change_surface` |
+| Edit management | `stage_edits`, `undo_edit`, `clear_edits` |
+| Time and map controls | `set_time`, `set_map_view`, `set_camera`, `select_tool` |
+
+Pairing codes expire after 10 minutes. Reloading a tab or restarting the backend
+requires a new pairing. Each agent connection has its own target; agents should
+use your code rather than guess a session from open browsers. Draft edits do not
+change temperature results until simulated. Readable spatial cells let an agent
+reason across the area, including exact ground-temperature maxima, shade,
+surfaces, building heights and canopy coverage.
+
+See [MCP setup, complete tool guide and troubleshooting](MCP.md) for HTTP/stdio
+configuration, arguments, feature IDs, spatial pagination and example tool calls.
 
 ### Rebuild the USYD area (only needed to change the area)
 ```bash
