@@ -28,7 +28,9 @@ function startMcpSync({ snapshot, apply, request, status }) {
         <button type="button" data-copy disabled>Copy connection code</button>
         <p data-expiry class="agent-pairing-expiry">Codes expire after 10 minutes.</p>
       </section>`;
-    (document.querySelector('header .actions') || document.body).appendChild(connection);
+    const actions = document.querySelector('header .actions');
+    if (actions) actions.prepend(connection);
+    else document.body.appendChild(connection);
     panel = connection.querySelector('.agent-pairing');
     panel.addEventListener('toggle', (event) => { if (event.newState === 'open') tick(); });
     panel.querySelector('[data-copy]').onclick = async () => {
