@@ -87,7 +87,6 @@ function startMcpSync({ snapshot, apply, request, status }) {
         panel.querySelector('[data-copy]').disabled = false;
         panel.querySelector('[data-copy]').textContent = 'Copy connection code';
         panel.querySelector('[data-expiry]').textContent = `Expires at ${new Date(pairingExpires).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`;
-        panel.title = `Session: ${sessionId}`;
       }
       connectSocket();
       const { events } = socket?.readyState === 1 ? { events: socketEvents } : await request(`agent/sessions/${sessionId}/events`);
