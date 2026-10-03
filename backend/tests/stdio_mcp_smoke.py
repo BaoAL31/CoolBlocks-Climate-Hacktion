@@ -15,7 +15,7 @@ async def main():
         async with ClientSession(read, write) as client:
             await client.initialize()
             tools = await client.list_tools()
-            assert len(tools.tools) == 12
+            assert len(tools.tools) == 14
             response = await client.call_tool('get_status', {})
             assert not response.isError
             status = response.structuredContent or json.loads(response.content[0].text)

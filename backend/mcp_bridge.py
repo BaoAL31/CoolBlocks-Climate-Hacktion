@@ -71,6 +71,16 @@ def create_mcp(dispatch):
         """Inspect pedestrian UTCI, surface and shade at a location for the scene's hour."""
         return await invoke('inspect_point', {'session_id': session_id, 'lon': lon, 'lat': lat})
 
+    @mcp.tool(annotations=read)
+    async def find_hotspot(session_id: str) -> dict:
+        """Find the hottest finite ground-level UTCI cell for the current date/hour and scenario, excluding roofs."""
+        return await invoke('find_hotspot', {'session_id': session_id})
+
+    @mcp.tool(annotations=write)
+    async def place_temperature_marker(session_id: str, lon: float, lat: float, view: Literal['real', 'heat'] = 'heat') -> dict:
+        """Display a temperature popup at lon/lat in the browser's real-world or heat map."""
+        return await invoke('place_temperature_marker', {'session_id': session_id, 'lon': lon, 'lat': lat, 'view': view})
+
     @mcp.tool(annotations=write)
     async def stage_edits(session_id: str, edits: list[dict]) -> dict:
         """Replace hypothetical draft edits in the map; include retained edits. GeoJSON uses lon/lat."""

@@ -35,13 +35,14 @@ def serialized_compute(function):
             _COMPUTE_STATUS['waiting'] += 1
         with COMPUTE_LOCK:
             with _STATUS_LOCK:
+                parent_status = (_COMPUTE_STATUS['operation'], _COMPUTE_STATUS['started'])
                 _COMPUTE_STATUS.update(operation=function.__name__, started=time.monotonic(),
                                        waiting=_COMPUTE_STATUS['waiting'] - 1)
             try:
                 return function(*args, **kwargs)
             finally:
                 with _STATUS_LOCK:
-                    _COMPUTE_STATUS.update(operation=None, started=None)
+                    _COMPUTE_STATUS.update(operation=parent_status[0], started=parent_status[1])
     return wrapped
 
 
@@ -98,6 +99,10 @@ class PointArgs(SessionArgs):
     lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
 
 
+class MarkerArgs(PointArgs):
+    view: Literal['real', 'heat'] = 'heat'
+
+
 class EditsArgs(SessionArgs):
     edits: list[dict] = Field(max_length=100,
                             description='GeoJSON edits: add_tree(Point,size), remove_trees(Polygon), surface(Polygon,surface), building(Polygon,height)')
@@ -129,6 +134,8 @@ TOOLS = {
     'get_weather': (SessionArgs, 'Read weather for the scene’s date, including whether weather is a fallback.'),
     'get_baseline': (SessionArgs, 'Calculate/read the baseline and return hourly heat metrics. Updates the connected map.'),
     'inspect_point': (PointArgs, 'Read modelled UTCI, surface and shade at a lon/lat point for the selected hour and scenario.'),
+    'find_hotspot': (SessionArgs, 'Find the maximum ground-level UTCI for the selected date/hour and current scenario; excludes roofs and invalid cells.'),
+    'place_temperature_marker': (MarkerArgs, 'Place the temperature popup at a coordinate in the connected map, with before/after UTCI and shade.'),
     'stage_edits': (EditsArgs, 'Replace the browser’s draft with validated edits; include existing edits if retaining them. Changes are reversible simulation drafts.'),
     'run_simulation': (SimulateArgs, 'Simulate the current draft before/after; return measured changes and display result images in the browser.'),
 }
@@ -205,6 +212,8 @@ class AgentTools:
             for key in ('date', 'hour'):
                 if key in payload:
                     session['scene'][key] = payload[key]
+            if 'selected_point' in payload:
+                session['scene']['selected_point'] = payload['selected_point']
             for key in ('baseline', 'result'):
                 if key in payload:
                     session['scene'][key] = compact(payload[key])
@@ -273,14 +282,21 @@ class AgentTools:
             return {'date': args.date, 'hour': args.hour, 'status': 'time changed; compute a baseline for this date'}
         if name == 'get_weather':
             return self.api['weather'](date=scene['date'])
+        if name == 'find_hotspot':
+            return self.api['hotspot'](date=scene['date'], hour=scene['hour'],
+                                       sim_id=(scene['result'] or {}).get('sim_id'))
         if name == 'get_baseline':
             result = self.api['baseline'](date=scene['date'])
             self._queue(args.session_id, scene['revision'], {'baseline': result})
             return compact(result)
-        if name == 'inspect_point':
+        if name in ('inspect_point', 'place_temperature_marker'):
             self.api['baseline'](date=scene['date'])
-            return self.api['point'](lon=args.lon, lat=args.lat, hour=scene['hour'], date=scene['date'],
-                                     sim_id=(scene['result'] or {}).get('sim_id'))
+            result = self.api['point'](lon=args.lon, lat=args.lat, hour=scene['hour'], date=scene['date'],
+                                       sim_id=(scene['result'] or {}).get('sim_id'))
+            if name == 'place_temperature_marker':
+                self._queue(args.session_id, scene['revision'],
+                            {'selected_point': {'lon': args.lon, 'lat': args.lat}, 'marker_view': args.view})
+            return {**result, 'lon': args.lon, 'lat': args.lat}
         if name == 'stage_edits':
             edits = self.validate_edits(args.edits)
             self._queue(args.session_id, scene['revision'], {'edits': edits})

@@ -24,7 +24,7 @@ async def main():
                         return result.structuredContent
                     return json.loads(result.content[0].text)
                 listed = await client.list_tools()
-                assert len(listed.tools) == 12
+                assert len(listed.tools) == 14
                 status = await tool('get_status')
                 area = await tool('get_area')
                 assert area['source'] == 'data/area'
@@ -49,6 +49,9 @@ async def main():
                 await tool('get_baseline', session_id=key)
                 inspected = await tool('inspect_point', session_id=key, lon=lon, lat=lat)
                 assert inspected['before'] is not None and inspected['after'] is not None
+                hottest = await tool('find_hotspot', session_id=key)
+                assert math.isfinite(hottest['utci'])
+                assert hottest['surface'] != 'roof'
                 guide = await client.read_resource('coolblocks://model-guide')
                 assert 'UTCI' in guide.contents[0].text
                 print(json.dumps({'protocol': 'PASS', 'tools': len(listed.tools), 'backend': status['backend'],

@@ -584,6 +584,15 @@ document.querySelectorAll('[data-view]').forEach((b) => b.tagName === 'BUTTON' &
       if (event.edits) { state.edits = event.edits; state.result = null; refreshEdits(); }
       if ('baseline' in event) state.baseline = event.baseline;
       if ('result' in event) state.result = event.result;
+      if (event.selected_point) {
+        const map = event.marker_view === 'real' ? mapReal : mapHeat;
+        state.probe = { map, lngLat: new maplibregl.LngLat(event.selected_point.lon, event.selected_point.lat) };
+        const view = event.marker_view === 'real' ? 'real' : 'heat';
+        document.querySelector('main').dataset.view = view;
+        document.querySelectorAll('.view-tabs button').forEach((button) => button.classList.toggle('active', button.dataset.view === view));
+        maps.forEach((item) => item.resize());
+        map.flyTo({ center: state.probe.lngLat, duration: 500 });
+      }
       render();
       probe();
     },

@@ -34,7 +34,7 @@ function startMcpSync({ snapshot, apply, request, status }) {
           apply(event);
           revision += 1;
           previous = JSON.stringify(summarize(snapshot()));
-          const change = event.edits ? 'draft edits' : 'date' in event || 'hour' in event ? 'the selected time'
+          const change = event.selected_point ? 'a temperature marker' : event.edits ? 'draft edits' : 'date' in event || 'hour' in event ? 'the selected time'
             : event.result ? 'simulation results' : 'baseline heat map';
           status(`Agent applied ${change}.`);
         }
@@ -43,6 +43,7 @@ function startMcpSync({ snapshot, apply, request, status }) {
     } catch (error) {
       // Don't block the map if MCP support is offline; try again on the next tick.
       console.warn('CoolBlocks MCP scene sync:', error.message);
+      if (/404/.test(error.message)) previous = ''; // Re-publish the scene after a server restart.
     } finally {
       busy = false;
     }

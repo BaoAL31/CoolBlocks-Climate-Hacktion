@@ -51,6 +51,8 @@ including entering the MCP session manager in the parent application's lifespan.
 | `get_weather` | Selected day's weather and fallback provenance |
 | `get_baseline` | Calculate baseline heat and display it in a connected browser |
 | `inspect_point` | UTCI, surface and shade before/after at a coordinate |
+| `find_hotspot` | Hottest finite ground-level UTCI cell for the selected time/scenario |
+| `place_temperature_marker` | Display a temperature popup at a coordinate on the real/heat map |
 | `stage_edits` | Replace hypothetical draft edits; an empty list clears them |
 | `run_simulation` | Before/after calculation, measured changes and browser result overlays |
 

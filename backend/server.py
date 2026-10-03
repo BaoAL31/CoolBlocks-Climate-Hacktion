@@ -54,6 +54,7 @@ from rasterio.warp import transform_geom
 import live_weather
 from agent_tools import AgentTools, serialized_compute
 from agent_routes import install_agents
+from heat_analysis import hottest_ground_point
 
 logging.getLogger("solweig").setLevel(logging.WARNING)
 log = logging.getLogger("coolblocks")
@@ -524,10 +525,34 @@ def _is_roof(lon, lat):
     return not (0 <= r < AREA.h and 0 <= c < AREA.w) or AREA.lc[int(r), int(c)] == 2
 
 
+@serialized_compute
+def _find_hotspot(date, hour, sim_id=None):
+    baseline(date)
+    base = _BASE.get(date, {}).get(hour)
+    if base is None:
+        raise HTTPException(409, 'No temperatures for this hour')
+    utci, landcover = base['utci'].copy(), AREA.lc.copy()
+    scenario = 'baseline'
+    if sim_id:
+        sim = _SIMS.get(sim_id)
+        if not sim or sim['date'] != date or hour not in sim['hours']:
+            raise HTTPException(409, 'Scenario results expired or do not cover this hour; simulate again')
+        values = sim['hours'][hour]['utci']
+        r, c = sim['r0'], sim['c0']
+        window = (slice(r, r + values.shape[0]), slice(c, c + values.shape[1]))
+        utci[window], landcover[window] = values, sim['lc']
+        scenario = 'after edits'
+    hottest = hottest_ground_point(utci, landcover, AREA.transform, AREA.to_lonlat.transform)
+    inspected = point(hottest['lon'], hottest['lat'], hour, date, sim_id)
+    return {**hottest, **inspected, 'date': date, 'scenario': scenario,
+            'metric': 'maximum ground-level UTCI at the selected hour'}
+
+
 AGENT_TOOLS = AgentTools(
     {'area': area, 'buildings': buildings, 'trees': trees, 'weather': weather,
      'baseline': baseline, 'simulate': simulate, 'point': point, 'is_roof': _is_roof,
-     'backend': lambda: getattr(solweig, 'get_compute_backend', lambda: 'unknown')()}, Edit, SimRequest,
+     'backend': lambda: getattr(solweig, 'get_compute_backend', lambda: 'unknown')(),
+     'hotspot': _find_hotspot}, Edit, SimRequest,
 )
 MCP = install_agents(app, AGENT_TOOLS)
 

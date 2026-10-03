@@ -43,6 +43,7 @@ def service():
            'point': lambda **kwargs: {'before': 30., 'shade_before': False},
            'trees': lambda: {'features': [{'geometry': TREE['geometry']}]},
            'buildings': lambda: {'features': []}, 'is_roof': lambda *args: False}
+    api['hotspot'] = lambda **kwargs: {'lon': 151.187, 'lat': -33.888, 'utci': 45., 'hour': kwargs['hour']}
     service = AgentTools(api, Edit, Simulation)
     service.publish('browser', Scene(revision=0, selected_point={'lon': 151.187, 'lat': -33.888}))
     return service
@@ -120,6 +121,30 @@ def test_invalid_hours_and_missing_session(service):
     with pytest.raises(HTTPException, match='404'):
         service.dispatch('get_scene', {'session_id': 'missing'})
     assert compact({'v': float('nan'), 'image_png': 'huge'}) == {'v': None}
+
+
+def test_hotspot_and_marker_queue(service):
+    hot = service.dispatch('find_hotspot', {'session_id': 'browser'})
+    assert hot['utci'] == 45.
+    result = service.dispatch('place_temperature_marker',
+                              {'session_id': 'browser', 'lon': hot['lon'], 'lat': hot['lat']})
+    assert result['before'] == 30.
+    event = service.events('browser')[0]
+    assert event['selected_point'] == {'lon': 151.187, 'lat': -33.888}
+    assert event['marker_view'] == 'heat'
+    assert service.dispatch('get_scene', {'session_id': 'browser'})['selected_point'] == event['selected_point']
+
+
+def test_hotspot_excludes_roofs_nan_and_uses_pixel_centers():
+    import numpy as np
+    from affine import Affine
+    from heat_analysis import hottest_ground_point
+    values = np.array([[100., np.nan], [45., 40.]])
+    surfaces = np.array([[2, 1], [1, 5]])
+    result = hottest_ground_point(values, surfaces, Affine.translation(10, 20), lambda x, y: (x, y))
+    assert result == {'lon': 10.5, 'lat': 21.5, 'utci': 45., 'row': 1, 'col': 0}
+    with pytest.raises(ValueError, match='No valid ground'):
+        hottest_ground_point(values, np.full((2, 2), 2), Affine.identity(), lambda x, y: (x, y))
 
 
 def test_mcp_protocol_discovers_and_calls_tools(service):
