@@ -9,12 +9,37 @@ function startMcpSync({ snapshot, apply, request, status }) {
   let socketEvents = [];
   let pairing = null;
   let pairingExpires = 0;
-  const panel = typeof document !== 'undefined' ? document.createElement('div') : null;
-  if (panel) {
-    panel.style.cssText = 'position:fixed;bottom:18px;left:18px;z-index:1000;background:#fff;color:#172b24;padding:12px 16px;border-radius:10px;box-shadow:0 2px 12px #0003;font:13px sans-serif';
-    panel.innerHTML = '<strong>Connect Agent</strong><div data-state>Connecting app?</div><button data-copy>Copy connection code</button><div data-code></div>';
-    document.body.appendChild(panel);
-    panel.querySelector('[data-copy]').onclick = () => pairing && navigator.clipboard.writeText(pairing.connection_code);
+  const connection = typeof document !== 'undefined' ? document.createElement('div') : null;
+  let panel = null;
+  if (connection) {
+    connection.className = 'agent-connection';
+    connection.innerHTML = `
+      <button type="button" popovertarget="agent-pairing" aria-label="Connect an agent" title="Connect an agent">
+        <i class="ph ph-plugs-connected" aria-hidden="true"></i><span>Connect Agent</span>
+      </button>
+      <section id="agent-pairing" class="agent-pairing" popover aria-labelledby="agent-pairing-title">
+        <div class="agent-pairing-heading">
+          <strong id="agent-pairing-title">Connect an agent</strong>
+          <button type="button" class="icon-btn" popovertarget="agent-pairing" popovertargetaction="hide" aria-label="Close agent connection"><i class="ph ph-x" aria-hidden="true"></i></button>
+        </div>
+        <p>Give this code to your agent to connect it to this map session.</p>
+        <div data-state role="status">Connecting app...</div>
+        <div data-code class="agent-pairing-code">Generating code...</div>
+        <button type="button" data-copy disabled>Copy connection code</button>
+        <p data-expiry class="agent-pairing-expiry">Codes expire after 10 minutes.</p>
+      </section>`;
+    (document.querySelector('header .actions') || document.body).appendChild(connection);
+    panel = connection.querySelector('.agent-pairing');
+    panel.addEventListener('toggle', (event) => { if (event.newState === 'open') tick(); });
+    panel.querySelector('[data-copy]').onclick = async () => {
+      if (!pairing) return;
+      try {
+        await navigator.clipboard.writeText(pairing.connection_code);
+        panel.querySelector('[data-copy]').textContent = 'Code copied';
+      } catch {
+        panel.querySelector('[data-copy]').textContent = 'Select and copy the code above';
+      }
+    };
   }
   function connectSocket() {
     if (typeof WebSocket === 'undefined' || typeof location === 'undefined' || stopped || socket) return;
@@ -23,12 +48,12 @@ function startMcpSync({ snapshot, apply, request, status }) {
     socket.onmessage = ({ data }) => {
       const message = JSON.parse(data);
       socketEvents = message.events;
-      if (panel) panel.querySelector('[data-state]').textContent = message.agent_connected ? '? Agent paired ? app online' : '? App online ? waiting for agent';
+      if (panel) panel.querySelector('[data-state]').textContent = message.agent_connected ? 'Agent connected' : 'App online - waiting for agent';
       tick();
     };
     socket.onclose = () => {
       socket = null;
-      if (panel) panel.querySelector('[data-state]').textContent = '? Reconnecting app?';
+      if (panel) panel.querySelector('[data-state]').textContent = 'Reconnecting app...';
     };
     socket.onerror = () => socket?.close();
   }
@@ -53,10 +78,13 @@ function startMcpSync({ snapshot, apply, request, status }) {
         revision = response.revision;
         previous = fingerprint;
       }
-      if (panel && Date.now() >= pairingExpires) {
+      if (panel?.matches(':popover-open') && Date.now() >= pairingExpires) {
         pairing = await request(`agent/sessions/${sessionId}/pairing`, { method: 'POST' });
         pairingExpires = Date.now() + pairing.expires_in * 1000;
-        panel.querySelector('[data-code]').textContent = `${pairing.connection_code} ? expires in 10 minutes`;
+        panel.querySelector('[data-code]').textContent = pairing.connection_code;
+        panel.querySelector('[data-copy]').disabled = false;
+        panel.querySelector('[data-copy]').textContent = 'Copy connection code';
+        panel.querySelector('[data-expiry]').textContent = `Expires at ${new Date(pairingExpires).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`;
         panel.title = `Session: ${sessionId}`;
       }
       connectSocket();
@@ -87,7 +115,7 @@ function startMcpSync({ snapshot, apply, request, status }) {
   }
   tick();
   const timer = setInterval(tick, 1000);
-  return { sessionId, sync: tick, stop() { stopped = true; clearInterval(timer); socket?.close(); panel?.remove(); } };
+  return { sessionId, sync: tick, stop() { stopped = true; clearInterval(timer); socket?.close(); connection?.remove(); } };
 }
 
 function decorateMcpEdits(edits, buildings) {
