@@ -1,6 +1,6 @@
 # CoolBlocks
 
-## 🌳 Try it live: [coolblocks.cool](https://coolblocks.cool)
+**🌳 Try it live: [coolblocks.cool](https://coolblocks.cool)**
 
 **Plant a tree, change a pavement or reshape a building on a 3D map of the University of Sydney, and see how much cooler (or hotter) the street would feel, hour by hour.**
 
