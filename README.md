@@ -1,3 +1,5 @@
+<p align="center"> <img src="assets/fulllogo.png" alt="CoolBlocks" width="480"> </p>
+
 # CoolBlocks
 
 **🌳 Try it live: [coolblocks.cool](https://coolblocks.cool)**
@@ -170,7 +172,7 @@ The code is GPL-3.0; the data files keep their own licences. See [`backend/data/
 - SOLWEIG doesn't model indoor energy use.
 
 ## Tools & AI disclosure
-Python, FastAPI, SOLWEIG, rasterio, pyproj, shapely, matplotlib, MapLibre GL JS. **Claude (Anthropic)** was used for planning, data checks and generating starter code (backend, data script, frontend), which the team then extended. *(Team: add any other tools you use.)*
+Python, FastAPI, SOLWEIG, rasterio, pyproj, shapely, matplotlib, MapLibre GL JS. **Claude (Anthropic)** was used for planning, data checks and generating starter code (backend, data script, frontend), which the team then extended. Flick (Creatorberry's open-source Claude Code skill, built on Remotion) was used to make the motion-graphics scenes and the logo in the demo video.
 
 ## Licence
 GPL-3.0 (required because SOLWEIG is GPL-3.0). Data stays under its original licences above.
