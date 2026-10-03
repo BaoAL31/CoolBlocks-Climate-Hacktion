@@ -1,3 +1,9 @@
+## Pair an agent with your app
+
+Open CoolBlocks and copy the six-character code from **Connect Agent**. Call `connect_to_app(connection_code="ABC234")`. That MCP connection now remembers the exact browser session: subsequent scene tools can omit `session_id`. An explicit `session_id` still works for independent scenarios.
+
+Codes expire after ten minutes. Each tab gets an independent session. Pairing requires a live WebSocket connection. Reloading the page creates a new session and code; reconnect the agent. Pairing is scoped to each stateful MCP connection, never a shared global target. Reinitializing MCP requires pairing again. The frontend reconnects its socket automatically and retains HTTP polling as a fallback. This local demo has no authenticated user/project accounts yet; pairing codes identify transient browser sessions.
+
 # CoolBlocks MCP
 
 External agents can understand the current map and use the same physics tools as

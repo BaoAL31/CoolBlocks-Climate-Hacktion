@@ -218,6 +218,8 @@ def test_mcp_protocol_discovers_and_calls_tools(service):
             response = client.post('/mcp/', headers=headers,
                                    json={'jsonrpc': '2.0', 'id': number, 'method': method, 'params': params})
             assert response.status_code == 200, response.text
+            if response.headers.get('mcp-session-id'):
+                headers['Mcp-Session-Id'] = response.headers['mcp-session-id']
             data = response.json()
             assert 'error' not in data, data
             return data['result']
@@ -225,10 +227,14 @@ def test_mcp_protocol_discovers_and_calls_tools(service):
                                         'clientInfo': {'name': 'test', 'version': '1'}}, 1)
         assert initialized['serverInfo']['name'] == 'CoolBlocks'
         tools = rpc('tools/list', {}, 2)['tools']
-        assert len(tools) == 26
+        assert len(tools) == 27
         assert {t['name'] for t in tools} >= {'get_area_state', 'add_tree', 'remove_building', 'undo_edit'}
         assert 'find_hotspot' not in {t['name'] for t in tools}
-        scene = rpc('tools/call', {'name': 'get_scene', 'arguments': {'session_id': 'browser'}}, 3)
+        service.sessions['browser']['ws_connected'] = True
+        code = service.pairing_code('browser')['connection_code']
+        paired = rpc('tools/call', {'name': 'connect_to_app', 'arguments': {'connection_code': code}}, 30)
+        assert paired.get('isError') is not True
+        scene = rpc('tools/call', {'name': 'get_scene', 'arguments': {}}, 3)
         assert scene.get('isError') is not True
         assert '151.187' in json.dumps(scene)
         staged = rpc('tools/call', {'name': 'stage_edits', 'arguments': {'session_id': 'browser', 'edits': [TREE]}}, 4)
@@ -236,3 +242,37 @@ def test_mcp_protocol_discovers_and_calls_tools(service):
         assert client.get('/api/agent/sessions/browser/events').json()['events'][0]['edits']
         guide = rpc('resources/read', {'uri': 'coolblocks://model-guide'}, 5)
         assert 'Negative UTCI change means cooling' in guide['contents'][0]['text']
+        headers.pop('Mcp-Session-Id')
+        rpc('initialize', {'protocolVersion': '2025-11-25', 'capabilities': {},
+                           'clientInfo': {'name': 'other-agent', 'version': '1'}}, 40)
+        unpaired = rpc('tools/call', {'name': 'get_scene', 'arguments': {}}, 41)
+        assert unpaired.get('isError') is True
+
+
+def test_pairing_targets_live_session_and_expires(service):
+    import time
+    code = service.pairing_code('browser')['connection_code']
+    with pytest.raises(ValueError, match='offline'):
+        service.connect(code)
+    service.sessions['browser']['ws_connected'] = True
+    assert service.connect(code)['session_id'] == 'browser'
+    service.pairings[code]['expires'] = time.monotonic() - 1
+    with pytest.raises(ValueError, match='expired'):
+        service.connect(code)
+
+
+def test_websocket_delivers_and_acknowledges_exact_session(service):
+    app = FastAPI()
+    install_agents(app, service)
+    with TestClient(app) as client:
+        with client.websocket_connect('/api/agent/sessions/browser/ws') as socket:
+            assert socket.receive_json()['events'] == []
+            code = client.post('/api/agent/sessions/browser/pairing').json()['connection_code']
+            assert service.connect(code)['session_id'] == 'browser'
+            service.dispatch('stage_edits', {'session_id': 'browser', 'edits': [TREE]})
+            socket.send_json({'ping': True})
+            message = socket.receive_json()
+            assert message['agent_connected']
+            event = message['events'][0]
+            socket.send_json({'ack': event['id']})
+            assert socket.receive_json()['events'] == []

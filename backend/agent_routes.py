@@ -1,7 +1,8 @@
 """Browser scene synchronization and agent endpoints."""
 import contextlib
+import asyncio
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from agent_tools import Scene, TOOLS
 from mcp_bridge import create_mcp
@@ -19,6 +20,37 @@ def install_agents(app, service):
         if not 1 <= len(session_id) <= 100:
             raise HTTPException(422, 'Invalid session ID')
         return service.publish(session_id, scene)
+
+    @router.post('/sessions/{session_id}/pairing')
+    def pairing(session_id: str):
+        return service.pairing_code(session_id)
+
+    @router.websocket('/sessions/{session_id}/ws')
+    async def session_socket(websocket: WebSocket, session_id: str):
+        # Only same-origin browser connections may subscribe to a live scene.
+        from urllib.parse import urlparse
+        origin = websocket.headers.get('origin')
+        if origin and urlparse(origin).netloc != websocket.headers.get('host'):
+            await websocket.close(code=1008)
+            return
+        await websocket.accept()
+        try:
+            session = service.session(session_id)
+            session['ws_connected'] = True
+            while True:
+                await websocket.send_json({'events': service.events(session_id),
+                                           'agent_connected': session.get('agent_connected', False)})
+                try:
+                    message = await asyncio.wait_for(websocket.receive_json(), timeout=0.25)
+                    if message.get('ack'):
+                        service.acknowledge(session_id, message['ack'])
+                except asyncio.TimeoutError:
+                    pass
+        except (WebSocketDisconnect, HTTPException):
+            pass
+        finally:
+            if session_id in service.sessions:
+                service.sessions[session_id]['ws_connected'] = False
 
     @router.get('/sessions/{session_id}/events')
     def events(session_id: str):

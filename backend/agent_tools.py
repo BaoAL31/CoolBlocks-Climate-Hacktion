@@ -6,6 +6,7 @@ from datetime import date
 import functools
 import json
 import math
+import secrets
 import threading
 import time
 from typing import Literal
@@ -89,6 +90,10 @@ class ToolArgs(BaseModel):
 
 class NoArgs(ToolArgs):
     pass
+
+
+class ConnectArgs(ToolArgs):
+    connection_code: str = Field(min_length=6, max_length=6)
 
 
 class SessionArgs(ToolArgs):
@@ -189,6 +194,7 @@ class SetTimeArgs(SessionArgs):
 
 
 TOOLS = {
+    'connect_to_app': (ConnectArgs, 'Pair to the exact live app session using its temporary six-character code.'),
     'get_status': (NoArgs, 'Check the compute backend, active operation, elapsed time and queued calculations.'),
     'list_sessions': (NoArgs, 'List active browser sessions; choose the user’s session before changing its scene.'),
     'get_scene': (SessionArgs, 'Read the current date, hour, selected point, draft edits and numerical results. Re-read before editing.'),
@@ -218,6 +224,7 @@ TOOLS = {
 }
 
 GUIDANCE = (
+    'Pair with the exact app session using connect_to_app and its temporary code. Never guess which browser to control. '
     'CoolBlocks models outdoor pedestrian heat over the University of Sydney. '
     'Coordinates are [longitude, latitude]; dates and hours are Australia/Sydney local time. '
     'UTCI is a feels-like index, not air temperature. Negative UTCI change means cooling. '
@@ -236,7 +243,34 @@ class AgentTools:
     def __init__(self, api, edit_model, sim_model):
         self.api, self.edit_model, self.sim_model = api, edit_model, sim_model
         self.sessions = {}
+        self.pairings = {}
         self.lock = threading.RLock()
+
+    def pairing_code(self, session_id):
+        with self.lock:
+            self.session(session_id)
+            now = time.monotonic()
+            self.pairings = {code: value for code, value in self.pairings.items() if value['expires'] > now}
+            for code, value in self.pairings.items():
+                if value['session_id'] == session_id:
+                    return {'connection_code': code, 'expires_in': int(value['expires'] - now), 'session_id': session_id}
+            while True:
+                code = ''.join(secrets.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(6))
+                if code not in self.pairings:
+                    break
+            self.pairings[code] = {'session_id': session_id, 'expires': now + 600}
+            return {'connection_code': code, 'expires_in': 600, 'session_id': session_id}
+
+    def connect(self, code):
+        with self.lock:
+            value = self.pairings.get(code.strip().upper())
+            if not value or value['expires'] <= time.monotonic():
+                raise ValueError('Pairing code is invalid or expired; request a new code in the app')
+            session = self.session(value['session_id'])
+            if not session.get('ws_connected'):
+                raise ValueError('This app session is offline; reconnect its browser first')
+            session['agent_connected'] = True
+            return {'session_id': value['session_id'], 'connected': True}
 
     def publish(self, session_id, scene, browser=True):
         with self.lock:
@@ -348,6 +382,8 @@ class AgentTools:
         if name not in TOOLS:
             raise ValueError(f'Unknown tool: {name}')
         args = TOOLS[name][0].model_validate(arguments)
+        if name == 'connect_to_app':
+            return self.connect(args.connection_code)
         if name == 'get_status':
             return {**compute_status(), 'backend': self.api.get('backend', lambda: 'unknown')(),
                     'source': self.api['area']().get('source', 'unknown')}

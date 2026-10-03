@@ -9,3 +9,5 @@ numpy
 shapely
 tzdata  # time zones on Windows
 mcp>=1.12,<2
+
+websockets>=12,<17
