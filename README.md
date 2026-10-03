@@ -1,5 +1,7 @@
 # CoolBlocks
 
+## 🌳 Try it live: [coolblocks.cool](https://coolblocks.cool)
+
 **Plant a tree, change a pavement or reshape a building on a 3D map of the University of Sydney, and see how much cooler (or hotter) the street would feel, hour by hour.**
 
 Built for **Climate Hack-tion 2026** · *Build for 2035* · COP31 priority: **Resilient Cities & Buildings** (helping cities cope with heatwaves).
