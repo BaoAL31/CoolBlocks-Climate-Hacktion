@@ -235,6 +235,7 @@ function refreshEdits() {
     if (m.getLayer('buildings-3d')) m.setFilter('buildings-3d', ['!', ['in', ['get', 'idx'], ['literal', gone]]]);
   });
   refreshTrees();
+  refreshChanges();
   $('simulate').querySelector('span').textContent = state.edits.length ? `Simulate (${state.edits.length})` : 'Simulate';
 }
 
@@ -248,6 +249,51 @@ function refreshDraft() {
   const ring = state.draft?.ring;
   const feats = ring ? [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] }, properties: { color: toolColor() } }] : [];
   maps.forEach((m) => m.getSource('draft')?.setData({ type: 'FeatureCollection', features: feats }));
+}
+
+// ---------------------------------------------------------------- your changes list
+
+const CHANGE_ICONS = { add_tree: 'ph-tree', remove_trees: 'ph-axe', surface: 'ph-paint-roller', building: 'ph-buildings' };
+const SURFACE_NAMES = { grass: 'grass', cool_asphalt: 'cool asphalt', asphalt: 'dark asphalt', paving: 'paving', soil: 'bare soil', water: 'water' };
+
+function describe(e) {
+  if (e.type === 'add_tree') return `Planted a ${e.size} tree`;
+  if (e.type === 'remove_trees') return 'Removed trees';
+  if (e.type === 'surface') return `Changed ground to ${SURFACE_NAMES[e.surface]}`;
+  if (e.demolish) return 'Demolished a building';
+  return `Building, ${e.height} m tall`;
+}
+
+let shownChanges = 0;
+function refreshChanges() {
+  const box = $('changes');
+  box.innerHTML = state.edits.map((e, i) => {
+    const icon = e.demolish ? 'ph-bulldozer' : CHANGE_ICONS[e.type];
+    const dot = e.type === 'surface' ? `<span class="dot" style="background:${SURFACE_COLORS[e.surface]}"></span>` : '';
+    return `<button class="chip${i >= shownChanges ? ' new' : ''}" data-i="${i}" title="${describe(e)}. Click to remove." aria-label="Remove: ${describe(e)}">`
+      + `<i class="ph ${icon} kind"></i><i class="ph ph-trash bin"></i>${dot}</button>`;
+  }).join('');
+  shownChanges = state.edits.length;
+  box.scrollLeft = box.scrollWidth;
+}
+
+$('changes').addEventListener('click', (ev) => {
+  const chip = ev.target.closest('.chip');
+  if (chip) removeEdit(Number(chip.dataset.i));
+});
+
+// remove one edit (and any demolish of it), keeping the other edits' references right
+function removeEdit(i) {
+  // drop the edit (and a demolish of it), then re-map demolish.edit indexes to the new positions
+  const newIndex = [];
+  let k = 0;
+  state.edits.forEach((e, j) => { newIndex[j] = (j === i || e.demolish?.edit === i) ? -1 : k++; });
+  state.edits = state.edits.filter((e, j) => newIndex[j] >= 0)
+    .map((e) => (e.demolish?.edit != null ? { ...e, demolish: { edit: newIndex[e.demolish.edit] } } : e));
+  shownChanges = state.edits.length;
+  state.result = null;
+  refreshEdits();
+  render();
 }
 
 function addEdit(e) {
@@ -407,7 +453,7 @@ async function probe() {
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape') { state.draft = null; refreshDraft(); }
 });
-$('undo').onclick = () => { state.edits.pop(); state.result = null; refreshEdits(); render(); };
+$('undo').onclick = () => { state.edits.pop(); shownChanges = state.edits.length; state.result = null; refreshEdits(); render(); };
 $('clear').onclick = () => { state.edits = []; state.result = null; refreshEdits(); render(); };
 
 // ---------------------------------------------------------------- time + weather
@@ -529,6 +575,41 @@ $('simulate').onclick = async () => {
   refreshEdits();
   render();
 };
+
+// ---------------------------------------------------------------- welcome + example
+
+function closeWelcome() {
+  $('welcome').classList.add('hidden');
+  try { localStorage.setItem('coolblocks-welcomed', '1'); } catch (e) { /* private mode */ }
+}
+$('welcomeClose').onclick = closeWelcome;
+$('welcomeExample').onclick = () => { closeWelcome(); runExample(); };
+try { if (!localStorage.getItem('coolblocks-welcomed')) $('welcome').classList.remove('hidden'); } catch (e) { $('welcome').classList.remove('hidden'); }
+
+// plant a row of street trees along the road nearest the middle of the area, then simulate
+async function runExample() {
+  if (!state.area) return;
+  try {
+    const { points, date } = await api('example');
+    if (!points.length) throw new Error('no street found');
+    if (date && state.date !== date) {  // a known hot day, so the difference is clear
+      state.date = date;
+      $('date').value = date;
+      state.result = null;
+      await loadBaseline();
+    }
+    points.forEach((p) => state.edits.push({ type: 'add_tree', size: 'medium', geometry: { type: 'Point', coordinates: p } }));
+    const lng = points.reduce((a, p) => a + p[0], 0) / points.length, lat = points.reduce((a, p) => a + p[1], 0) / points.length;
+    mapReal.easeTo({ center: [lng, lat], zoom: 17.6, duration: 800 });
+    state.result = null;
+    refreshEdits();
+    render();
+    $('simulate').click();
+  } catch (err) {
+    $('status').textContent = `Couldn't make the example: ${err.message}`;
+  }
+}
+$('example').onclick = runExample;
 
 // ---------------------------------------------------------------- phone: one map at a time
 

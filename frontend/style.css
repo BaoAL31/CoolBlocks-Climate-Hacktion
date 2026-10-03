@@ -58,7 +58,7 @@ header {
 .brand .name { font-weight: 700; font-size: 17px; letter-spacing: -.01em; color: var(--accent); }
 .brand .tagline { font-size: 12px; color: var(--muted); }
 
-.toolbar { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
+.toolbar { display: flex; align-items: center; gap: 12px; flex: none; }
 .tools {
   display: flex; gap: 2px; padding: 3px; flex: none;
   background: var(--sunken); border-radius: calc(var(--r-ctl) + 3px);
@@ -71,6 +71,37 @@ header {
 .option select { min-width: 0; max-width: 190px; }
 .option.show { display: inline-flex; }
 .actions { display: flex; gap: 6px; margin-left: auto; flex: none; }
+
+/* your changes: one icon per edit, hover turns it into a red bin */
+.changes { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.changes > :first-child { margin-left: auto; }  /* right-aligned, but still scrollable when full */
+.changes .chip {
+  position: relative; width: 30px; height: 30px; padding: 0; flex: none; justify-content: center; overflow: hidden;
+  border-radius: var(--r-ctl); background: var(--sunken); border-color: transparent; color: var(--ink);
+}
+.changes .chip i { position: absolute; transition: transform .18s ease, opacity .18s ease; }
+.changes .chip .bin { color: #fff; opacity: 0; transform: translateY(12px) scale(.6); }
+.changes .chip .dot { position: absolute; right: 4px; bottom: 4px; width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--panel); transition: opacity .18s; }
+.changes .chip:hover, .changes .chip:focus-visible { background: #d64545; border-color: #d64545; }
+.changes .chip:hover .kind, .changes .chip:focus-visible .kind { opacity: 0; transform: translateY(-12px) scale(.6); }
+.changes .chip:hover .bin, .changes .chip:focus-visible .bin { opacity: 1; transform: none; }
+.changes .chip:hover .dot { opacity: 0; }
+.changes .chip.new { animation: pop .25s ease-out; }
+@keyframes pop { from { transform: scale(.4); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .changes .chip i, .changes .chip.new { transition: none; animation: none; } }
+
+/* first-visit welcome */
+.welcome { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px; background: rgba(12, 18, 15, .45); }
+.welcome-card {
+  width: min(460px, 100%); padding: 22px 24px; border-radius: var(--r-float);
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow);
+}
+.welcome-card h1 { margin: 0 0 8px; font-size: 20px; letter-spacing: -.01em; }
+.welcome-card p { margin: 0 0 14px; color: var(--muted); }
+.welcome-card ol { list-style: none; margin: 0 0 18px; padding: 0; display: grid; gap: 10px; }
+.welcome-card li { display: flex; gap: 10px; align-items: center; }
+.welcome-card li i { color: var(--accent); font-size: 20px; }
+.welcome-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* ---------------------------------------------------------------- maps */
 .view-tabs { display: none; grid-area: tabs; }
@@ -157,7 +188,7 @@ footer {
 .status .warn { color: var(--hot); }
 
 /* ---------------------------------------------------------------- smaller screens */
-@media (max-width: 1400px) { .brand .tagline { display: none; } }
+@media (max-width: 1400px) { .brand .tagline { display: none; } #example span { display: none; } #example { width: 34px; padding: 0; justify-content: center; } }
 @media (max-width: 1320px) {
   .tools button:not(.active) span { display: none; }  /* icons only, the active tool keeps its label */
   .pane-title small { display: none; }
@@ -171,6 +202,8 @@ footer {
 @media (max-width: 760px) {
   header { flex-wrap: wrap; gap: 8px 10px; padding: 8px 12px; }
   .toolbar { order: 3; flex-basis: 100%; flex-wrap: wrap; gap: 8px; }
+  .changes { order: 4; flex-basis: 100%; justify-content: flex-start; }
+  .changes:empty { display: none; }
   .tools { overflow-x: auto; max-width: 100%; scrollbar-width: none; }
   .view-tabs { display: flex; gap: 2px; padding: 3px; margin: 8px 12px 0; background: var(--sunken); border-radius: calc(var(--r-ctl) + 3px); }
   .view-tabs button { flex: 1; justify-content: center; height: 32px; border-color: transparent; background: transparent; color: var(--muted); }
