@@ -1,8 +1,11 @@
-# data is rebuilt by backend/scripts/build_area.py (canopy licence is No-Derivatives: don't commit derived rasters)
-backend/data/*
-!backend/data/README.md
-*.tif
-*.tiff
+# Area data IS committed so the app runs straight after cloning, except:
+# cdsm.tif = tree heights derived from the NSW canopy layer (CC BY-NC-ND: no derivatives may be shared).
+# The server rebuilds it from the committed, unchanged cut-out backend/data/raw/canopy_usyd.tif on first start.
+backend/data/area/cdsm.tif
+backend/data/area/*.aux.xml
+backend/data/raw/*
+!backend/data/raw/canopy_usyd.tif
+!backend/data/raw/osm.json
 __pycache__/
 .venv/
 venv/

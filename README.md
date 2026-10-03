@@ -35,16 +35,19 @@ pip install -r requirements.txt
 uvicorn server:app --reload
 # open http://127.0.0.1:8000  (app)   or   http://127.0.0.1:8000/docs  (API)
 ```
-Without area data the server uses a **synthetic demo block**, so the app works straight away.
+The real USYD area data is in the repo (`backend/data/`), so it works straight after cloning. On the first start the
+server builds the tree-height map from the canopy file (a second or two). Without area data it falls back to a
+**synthetic demo block**.
 
-### Build the real USYD area
+### Rebuild the USYD area (only needed to change the area)
 ```bash
 cd backend
-mkdir -p data/raw
-python scripts/build_area.py --canopy path/to/canopy_SYDNEY.tif --osm-json data/raw/osm.json
-# --canopy is optional (without it, existing trees are left out); --dem defaults to the Copernicus GLO-30 tile online
+python scripts/clip_canopy.py path/to/gsr_2024_canopy_gda2020.zip   # -> data/raw/canopy_usyd.tif
+python scripts/build_area.py --canopy data/raw/canopy_usyd.tif --osm-json data/raw/osm.json
+# --dem defaults to the Copernicus GLO-30 tile online; use --bbox W S E N for another area
 ```
-This downloads OpenStreetMap buildings, roads, parks and water (cached to `osm.json`) and writes 1 m maps (EPSG:7856) to `data/area/`. Restart the server to use them.
+This uses OpenStreetMap buildings, roads, parks and water (cached in `osm.json`) and writes 1 m maps (EPSG:7856) to
+`data/area/`. Restart the server to use them.
 
 ## API
 | Endpoint | What |
@@ -54,6 +57,7 @@ This downloads OpenStreetMap buildings, roads, parks and water (cached to `osm.j
 | `GET /api/weather?date=` | hourly weather (live if no date) |
 | `GET /api/baseline?date=` | heat + shade images for the whole area (cached after the first call) |
 | `POST /api/simulate` | `{edits, date?, hours?}` → per-hour stats and heat / change / shade images |
+| `GET /api/point?lon=&lat=&hour=&date=&sim_id=` | "feels like" temperature at one spot, before and after edits |
 
 Edit types: `add_tree` (Point, `size`), `remove_trees` (Polygon), `surface` (Polygon, `surface`), `building` (Polygon, `height` in m; `0` = demolish).
 
@@ -61,13 +65,15 @@ Edit types: `add_tree` (Point, `size`), `remove_trees` (Polygon), `surface` (Pol
 | Data | Source | Licence |
 |---|---|---|
 | Buildings, roads, parks, water | OpenStreetMap (Overpass API) | ODbL, © OpenStreetMap contributors |
-| Tree canopy | NSW Planning, Greater Sydney Region Tree Canopy 2024/25 | CC BY-NC-ND 4.0 (derived rasters not redistributed) |
+| Tree canopy | NSW Planning, Greater Sydney Region Tree Canopy 2024/25 | CC BY-NC-ND 4.0 (unchanged USYD cut-out included; derived tree heights are built locally, not shared) |
 | Ground elevation | Copernicus GLO-30 DEM | Copernicus licence |
 | Weather (live / past days) | Open-Meteo | CC BY 4.0 |
 | Hot-day selection, air temperature | Western Sydney University, City of Sydney sensor network 2023/24 | CC BY 4.0 |
 | Weather (specific days) | ERA5 (Copernicus CDS), PVGIS TMY | Copernicus licence |
 | Aerial imagery basemap | NSW Spatial Services | CC BY 4.0 |
 | Map basemap | OpenStreetMap tiles | ODbL |
+
+The code is GPL-3.0; the data files keep their own licences. See [`backend/data/LICENSES.md`](backend/data/LICENSES.md).
 
 ## Limitations
 - Results are model estimates; show changes, not absolute readings.

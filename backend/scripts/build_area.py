@@ -6,15 +6,18 @@ Inputs
   --bbox      west south east north, in lon/lat (default: USYD Camperdown + surrounds, with buffer)
   --dem       ground elevation GeoTIFF in any CRS (NSW ELVIS 1 m DEM is best). Optional: if omitted, the
               Copernicus GLO-30 tile for Sydney is read straight from its public AWS bucket
-  --canopy    tree canopy raster in any CRS, non-zero = canopy (e.g. Greater Sydney Tree Canopy 2024/25 tile)
+  --canopy    tree canopy raster in any CRS, non-zero = canopy (e.g. Greater Sydney Tree Canopy 2024/25).
+              A .tif, a folder of .tif files, or the downloaded .zip as-is. Only the study area is read,
+              so the whole-region file is fine.
   --osm-json  optional cached Overpass response; otherwise it's downloaded from the Overpass API
 
 Buildings, roads, parks and water come from OpenStreetMap (ODbL, attribute "© OpenStreetMap contributors").
 Building height: OSM `height` tag, else `building:levels` x 3.2 m, else --default-height.
 Tree height: canopy pixels get --tree-height (no per-tree heights in the canopy layer), tapered at crown edges.
 
-Licence note: the Greater Sydney canopy layer is CC BY-NC-ND 4.0. Don't commit the generated cdsm.tif
-(data/ is git-ignored); commit this script instead so anyone can rebuild it.
+Licence note: the Greater Sydney canopy layer is CC BY-NC-ND 4.0. The unchanged USYD cut-out
+(data/raw/canopy_usyd.tif, made by clip_canopy.py) may be shared non-commercially with credit, but the tree-height
+raster made from it (data/area/cdsm.tif) is a derivative and must not be committed: the server rebuilds it on start.
 
 Example:
   python scripts/build_area.py                                   # OSM buildings + GLO-30 ground, no trees
@@ -25,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -34,7 +38,8 @@ from pyproj import Transformer
 from rasterio.enums import Resampling
 from rasterio.features import rasterize
 from rasterio.transform import from_origin
-from rasterio.warp import reproject
+from rasterio.warp import reproject, transform_bounds
+from rasterio.windows import Window, from_bounds
 from shapely.geometry import LineString, Polygon, mapping
 from shapely.ops import transform as shp_transform
 
@@ -138,6 +143,59 @@ def warp_to_grid(path, transform, shape, resampling):
     return out
 
 
+def canopy_sources(path):
+    """GeoTIFF(s) to read canopy from: a .tif, a folder of .tif files, or the .zip as downloaded (no need to unzip)."""
+    p = Path(path)
+    if p.is_dir():
+        return [str(f) for f in sorted(p.rglob("*.tif"))]
+    if p.suffix.lower() == ".zip":
+        with zipfile.ZipFile(p) as z:
+            return [f"/vsizip/{p.resolve().as_posix()}/{n}" for n in z.namelist() if n.lower().endswith(".tif")]
+    return [str(p)]
+
+
+def canopy_fraction(path, transform, shape):
+    """Fraction of each 1 m cell covered by canopy. Only the part of the (huge) canopy raster over our area is read."""
+    frac = np.zeros(shape, np.float32)
+    h, w = shape
+    bounds = (transform.c, transform.f + transform.e * h, transform.c + transform.a * w, transform.f)
+    sources = canopy_sources(path)
+    if not sources:
+        raise SystemExit(f"no .tif files found in {path}")
+    for f in sources:
+        with rasterio.open(f) as src:
+            l, b, r, t = transform_bounds(CRS, src.crs, *bounds)
+            win = from_bounds(l, b, r, t, src.transform).round_offsets().round_lengths()
+            col0, row0 = max(0, win.col_off), max(0, win.row_off)
+            col1, row1 = min(src.width, win.col_off + win.width + 1), min(src.height, win.row_off + win.height + 1)
+            if col1 <= col0 or row1 <= row0:
+                continue  # this file doesn't cover our area
+            win = Window(int(col0), int(row0), int(col1 - col0), int(row1 - row0))
+            data = src.read(1, window=win)
+            mask = data > 0  # any non-zero class = canopy
+            if src.nodata is not None:
+                mask &= data != src.nodata
+            out = np.zeros(shape, np.float32)
+            reproject(mask.astype(np.float32), out, src_transform=src.window_transform(win), src_crs=src.crs,
+                      dst_transform=transform, dst_crs=CRS, resampling=Resampling.average)
+            print(f"canopy: read {win.width} x {win.height} px from {Path(f).name}")
+            frac = np.maximum(frac, out)
+    return frac
+
+
+def canopy_to_cdsm(canopy, transform, shape, lc, tree_height=10.0):
+    """Tree heights above ground (SOLWEIG's CDSM) from a canopy raster. Also used by server.py on first start."""
+    frac = canopy_fraction(canopy, transform, shape)
+    tree = (frac >= 0.5) & (lc != 2)
+    # taper crowns: cells 1-3 m from the crown edge are lower than the centre
+    depth = tree.astype(np.int32)
+    cur = tree.copy()
+    for _ in range(3):
+        cur = cur & np.roll(cur, 1, 0) & np.roll(cur, -1, 0) & np.roll(cur, 1, 1) & np.roll(cur, -1, 1)
+        depth += cur
+    return np.where(tree, tree_height * (0.7 + 0.1 * (depth - 1)), 0).astype(np.float32)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--bbox", type=float, nargs=4, default=USYD_BBOX, metavar=("W", "S", "E", "N"))
@@ -204,16 +262,8 @@ def main():
     if not a.canopy:
         print("no --canopy given: existing trees left out (add the Greater Sydney canopy tile to include them)")
     if a.canopy:
-        frac = warp_to_grid(a.canopy, transform, shape, Resampling.average)  # mean of 0/1 mask = fraction
-        tree = (np.nan_to_num(frac) >= 0.5) & (lc != 2)
-        # taper crowns: cells 1-3 m from the crown edge are lower than the centre
-        depth = tree.astype(np.int32)
-        cur = tree.copy()
-        for _ in range(3):
-            cur = cur & np.roll(cur, 1, 0) & np.roll(cur, -1, 0) & np.roll(cur, 1, 1) & np.roll(cur, -1, 1)
-            depth += cur
-        cdsm = np.where(tree, a.tree_height * (0.7 + 0.1 * (depth - 1)), 0).astype(np.float32)
-        print(f"canopy cover {tree.mean():.0%}")
+        cdsm = canopy_to_cdsm(a.canopy, transform, shape, lc, a.tree_height)
+        print(f"canopy cover {(cdsm > 0).mean():.0%}")
 
     profile = dict(driver="GTiff", height=shape[0], width=shape[1], count=1, crs=CRS, transform=transform, compress="deflate")
     for name, arr in [("dsm", dsm), ("dem", dem), ("cdsm", cdsm), ("landcover", lc)]:
