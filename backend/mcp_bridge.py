@@ -52,9 +52,9 @@ def create_mcp(dispatch):
         return await invoke('get_area', {})
 
     @mcp.tool(annotations=read)
-    async def get_features(kind: Literal['buildings', 'trees'], limit: int = 50, bbox: list[float] | None = None) -> dict:
+    async def get_features(kind: Literal['buildings', 'trees'], limit: int = 50, bbox: list[float] | None = None, offset: int = 0) -> dict:
         """Actual trees/building GeoJSON; optional west,south,east,north filter; max 200 features."""
-        return await invoke('get_features', {'kind': kind, 'limit': limit, 'bbox': bbox})
+        return await invoke('get_features', {'kind': kind, 'limit': limit, 'bbox': bbox, 'offset': offset})
 
     @mcp.tool(annotations=read)
     async def get_weather(session_id: str) -> dict:
@@ -72,9 +72,11 @@ def create_mcp(dispatch):
         return await invoke('inspect_point', {'session_id': session_id, 'lon': lon, 'lat': lat})
 
     @mcp.tool(annotations=read)
-    async def find_hotspot(session_id: str) -> dict:
-        """Find the hottest finite ground-level UTCI cell for the current date/hour and scenario, excluding roofs."""
-        return await invoke('find_hotspot', {'session_id': session_id})
+    async def get_area_state(session_id: str, bbox: list[float] | None = None, cell_size_m: int = 50,
+                             offset: int = 0, limit: int = 32, hours: list[int] | None = None) -> dict:
+        """Read agent-readable spatial cells: heat distributions, exact pixel maxima, shade, surfaces, building heights and canopy. Follow next_offset for all cells, or refine a west,south,east,north bbox to 1m cells. Up to 3 selected local hours per call."""
+        return await invoke('get_area_state', {'session_id': session_id, 'bbox': bbox, 'cell_size_m': cell_size_m,
+                                               'offset': offset, 'limit': limit, 'hours': hours})
 
     @mcp.tool(annotations=write)
     async def place_temperature_marker(session_id: str, lon: float, lat: float, view: Literal['real', 'heat'] = 'heat') -> dict:
@@ -90,6 +92,76 @@ def create_mcp(dispatch):
     async def run_simulation(session_id: str, hours: list[int] | None = None) -> dict:
         """Run before/after physics for the current draft, return numbers and display images."""
         return await invoke('run_simulation', {'session_id': session_id, 'hours': hours})
+
+    @mcp.tool(annotations=write)
+    async def add_tree(session_id: str, lon: float, lat: float, size: Literal['small', 'medium', 'large'] = 'medium') -> dict:
+        """Append a tree at a ground coordinate without discarding existing drafts; small=6m, medium=10m, large=15m."""
+        return await invoke('add_tree', {'session_id': session_id, 'lon': lon, 'lat': lat, 'size': size})
+
+    @mcp.tool(annotations=write)
+    async def remove_tree(session_id: str, tree_id: str) -> dict:
+        """Remove canopy within a tree's modelled crown by tree:<index> or draft:<edit index>; may overlap nearby canopy."""
+        return await invoke('remove_tree', {'session_id': session_id, 'tree_id': tree_id})
+
+    @mcp.tool(annotations=write)
+    async def remove_trees(session_id: str, geometry: dict) -> dict:
+        """Append removal of all canopy within a GeoJSON Polygon/MultiPolygon in lon/lat."""
+        return await invoke('remove_trees', {'session_id': session_id, 'geometry': geometry})
+
+    @mcp.tool(annotations=write)
+    async def add_building(session_id: str, geometry: dict, height: float) -> dict:
+        """Append a new building footprint (GeoJSON Polygon/MultiPolygon) with height 1–250m."""
+        return await invoke('add_building', {'session_id': session_id, 'geometry': geometry, 'height': height})
+
+    @mcp.tool(annotations=write)
+    async def set_building_height(session_id: str, building_id: str, height: float) -> dict:
+        """Change height of building:<index> or draft:<edit index>, in metres; 0 means demolition."""
+        return await invoke('set_building_height', {'session_id': session_id, 'building_id': building_id, 'height': height})
+
+    @mcp.tool(annotations=write)
+    async def remove_building(session_id: str, building_id: str) -> dict:
+        """Stage demolition of an existing or drafted building by stable building:<index> or draft:<edit index>."""
+        return await invoke('remove_building', {'session_id': session_id, 'building_id': building_id})
+
+    @mcp.tool(annotations=write)
+    async def change_surface(session_id: str, geometry: dict,
+                              surface: Literal['paving', 'asphalt', 'grass', 'soil', 'water', 'cool_asphalt']) -> dict:
+        """Append ground-surface change within a GeoJSON polygon. Roofs are protected."""
+        return await invoke('change_surface', {'session_id': session_id, 'geometry': geometry, 'surface': surface})
+
+    @mcp.tool(annotations=write)
+    async def undo_edit(session_id: str) -> dict:
+        """Undo the last draft edit and invalidate simulation results."""
+        return await invoke('undo_edit', {'session_id': session_id})
+
+    @mcp.tool(annotations=write)
+    async def clear_edits(session_id: str) -> dict:
+        """Clear all hypothetical edits and their stale results."""
+        return await invoke('clear_edits', {'session_id': session_id})
+
+    @mcp.tool(annotations=write)
+    async def set_map_view(session_id: str, map_view: Literal['real', 'heat'] | None = None,
+                             heat_mode: Literal['heat', 'change'] | None = None,
+                             show_shade: bool | None = None, show_3d: bool | None = None) -> dict:
+        """Switch real/heat map, temperature/change overlay, and shade/3D visibility; omit unchanged options."""
+        return await invoke('set_map_view', {'session_id': session_id, 'map_view': map_view, 'heat_mode': heat_mode,
+                                             'show_shade': show_shade, 'show_3d': show_3d})
+
+    @mcp.tool(annotations=write)
+    async def set_camera(session_id: str, lon: float, lat: float, zoom: float | None = None,
+                           pitch: float | None = None, bearing: float | None = None) -> dict:
+        """Pan, zoom (0–22), tilt (0–85 degrees) and rotate (bearing) the connected map."""
+        return await invoke('set_camera', {'session_id': session_id, 'lon': lon, 'lat': lat,
+                                           'zoom': zoom, 'pitch': pitch, 'bearing': bearing})
+
+    @mcp.tool(annotations=write)
+    async def select_tool(session_id: str, tool: Literal['pan', 'probe', 'tree', 'remove_trees', 'surface', 'building', 'demolish'],
+                          tree_size: Literal['small', 'medium', 'large'] | None = None,
+                          surface_type: Literal['paving', 'asphalt', 'grass', 'soil', 'water', 'cool_asphalt'] | None = None,
+                          building_height: float | None = None) -> dict:
+        """Select the current UI tool and its tree-size, surface-type or building-height options."""
+        return await invoke('select_tool', {'session_id': session_id, 'tool': tool, 'tree_size': tree_size,
+                                            'surface_type': surface_type, 'building_height': building_height})
 
     @mcp.resource('coolblocks://model-guide')
     def model_guide() -> str:

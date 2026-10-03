@@ -1,8 +1,18 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { startMcpSync } = require('../mcp-sync.js');
+const { startMcpSync, decorateMcpEdits } = require('../mcp-sync.js');
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+test('MCP demolition/height edits hide existing and earlier draft buildings', () => {
+  const geometry = { type: 'Polygon', coordinates: [[[1, 1], [2, 1], [2, 2], [1, 1]]] };
+  const buildings = [{ geometry, properties: { idx: 4 } }];
+  const raised = decorateMcpEdits([{ type: 'building', geometry, height: 10 }], buildings);
+  assert.deepEqual(raised[0].replaces, { idx: 4 });
+  const removed = decorateMcpEdits([{ type: 'building', geometry, height: 10 }, { type: 'building', geometry, height: 0 }], buildings);
+  assert.deepEqual(removed[1].demolish, { idx: 4, edit: 0 });
+  assert.equal(decorateMcpEdits([], buildings).length, 0, 'clear restores the original buildings');
+});
 
 test('publishes semantic context, applies sequential MCP actions and acknowledges once', async () => {
   let scene = { date: null, hour: 15, edits: [], selected_point: null, map_center: [151.187, -33.888],

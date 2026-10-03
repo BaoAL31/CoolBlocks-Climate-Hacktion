@@ -43,7 +43,7 @@ def service():
            'point': lambda **kwargs: {'before': 30., 'shade_before': False},
            'trees': lambda: {'features': [{'geometry': TREE['geometry']}]},
            'buildings': lambda: {'features': []}, 'is_roof': lambda *args: False}
-    api['hotspot'] = lambda **kwargs: {'lon': 151.187, 'lat': -33.888, 'utci': 45., 'hour': kwargs['hour']}
+    api['area_state'] = lambda **kwargs: {'cells': [], 'date': kwargs['date'], 'hours_requested': kwargs['hours'], 'cell_size_m': kwargs['cell_size_m']}
     service = AgentTools(api, Edit, Simulation)
     service.publish('browser', Scene(revision=0, selected_point={'lon': 151.187, 'lat': -33.888}))
     return service
@@ -123,16 +123,78 @@ def test_invalid_hours_and_missing_session(service):
     assert compact({'v': float('nan'), 'image_png': 'huge'}) == {'v': None}
 
 
-def test_hotspot_and_marker_queue(service):
-    hot = service.dispatch('find_hotspot', {'session_id': 'browser'})
-    assert hot['utci'] == 45.
+def test_area_state_and_marker_queue(service):
+    state = service.dispatch('get_area_state', {'session_id': 'browser', 'cell_size_m': 10})
+    assert state['cell_size_m'] == 10
     result = service.dispatch('place_temperature_marker',
-                              {'session_id': 'browser', 'lon': hot['lon'], 'lat': hot['lat']})
+                              {'session_id': 'browser', 'lon': 151.187, 'lat': -33.888})
     assert result['before'] == 30.
     event = service.events('browser')[0]
     assert event['selected_point'] == {'lon': 151.187, 'lat': -33.888}
     assert event['marker_view'] == 'heat'
     assert service.dispatch('get_scene', {'session_id': 'browser'})['selected_point'] == event['selected_point']
+
+
+def test_named_edits_append_target_ids_and_undo(service):
+    polygon = {'type': 'Polygon', 'coordinates': [[[151.185, -33.889], [151.188, -33.889], [151.188, -33.887], [151.185, -33.889]]]}
+    service.api['buildings'] = lambda: {'features': [{'geometry': polygon, 'properties': {'height': 20}}]}
+    key = service.dispatch('create_scene', {})['session_id']
+    tree = service.dispatch('add_tree', {'session_id': key, 'lon': 151.187, 'lat': -33.888, 'size': 'large'})
+    assert tree['edit_count'] == 1 and tree['edits'][0]['size'] == 'large'
+    removed = service.dispatch('remove_building', {'session_id': key, 'building_id': 'building:0'})
+    assert removed['edit_count'] == 2 and removed['edits'][1]['height'] == 0
+    undone = service.dispatch('undo_edit', {'session_id': key})
+    assert undone['edits'] == tree['edits']
+    built = service.dispatch('add_building', {'session_id': key, 'geometry': polygon, 'height': 12})
+    changed = service.dispatch('set_building_height', {'session_id': key, 'building_id': 'draft:1', 'height': 8})
+    assert changed['edit_count'] == 3 and changed['edits'][-1]['height'] == 8
+    clear = service.dispatch('clear_edits', {'session_id': key})
+    assert clear['edits'] == []
+    with pytest.raises(ValueError):
+        service.dispatch('remove_building', {'session_id': key, 'building_id': 'building:100'})
+
+
+def test_named_tree_removal_surface_and_view_controls(service):
+    polygon = {'type': 'Polygon', 'coordinates': [[[151.185, -33.889], [151.188, -33.889], [151.188, -33.887], [151.185, -33.889]]]}
+    service.api['trees'] = lambda: {'features': [{'geometry': TREE['geometry'], 'properties': {'radius': 4}}]}
+    key = service.dispatch('create_scene', {})['session_id']
+    removed = service.dispatch('remove_tree', {'session_id': key, 'tree_id': 'tree:0'})
+    assert removed['edits'][0]['type'] == 'remove_trees'
+    service.dispatch('add_tree', {'session_id': key, 'lon': 151.187, 'lat': -33.888})
+    service.dispatch('remove_tree', {'session_id': key, 'tree_id': 'draft:1'})
+    service.dispatch('change_surface', {'session_id': key, 'geometry': polygon, 'surface': 'grass'})
+    service.dispatch('set_map_view', {'session_id': key, 'map_view': 'heat', 'heat_mode': 'change', 'show_3d': False})
+    service.dispatch('set_camera', {'session_id': key, 'lon': 151.187, 'lat': -33.888, 'zoom': 18})
+    service.dispatch('select_tool', {'session_id': key, 'tool': 'building', 'building_height': 30})
+    scene = service.dispatch('get_scene', {'session_id': key})
+    assert scene['map_view'] == 'heat' and scene['heat_mode'] == 'change'
+    assert scene['camera']['zoom'] == 18 and scene['tool_options']['building_height'] == 30
+    assert len(scene['edits']) == 4
+
+
+def test_feature_pagination_retains_stable_ids(service):
+    service.api['trees'] = lambda: {'features': [{'geometry': TREE['geometry']} for _ in range(3)]}
+    page = service.dispatch('get_features', {'kind': 'trees', 'offset': 1, 'limit': 1})
+    assert page['features'][0]['id'] == 'tree:1' and page['next_offset'] == 2
+
+
+def test_grid_state_paging_and_evidence():
+    import numpy as np
+    from affine import Affine
+    from area_state import grid_state
+    land = np.array([[2, 1, 5], [1, 5, 5]])
+    temperatures = np.array([[100., 40., np.nan], [45., 35., 30.]])
+    values = {15: {'utci': temperatures, 'shadow': np.array([[0, 1, 1], [1, 0, 0]])}}
+    first = grid_state(np.ones((2, 3)), np.full((2, 3), 20), np.zeros((2, 3)), land,
+                       values, None, Affine.identity(), lambda x, y: (x, y), cell_size_m=2, limit=1)
+    cell = first['cells'][0]
+    assert first['total_cells'] == 2 and first['next_offset'] == 1
+    assert cell['surfaces_m2'] == {'asphalt': 2, 'roof': 1, 'grass': 1}
+    assert cell['hours'][0]['after_utci_c']['max'] == 45.
+    assert cell['hours'][0]['maximum_ground_point']['lon'] == .5
+    second = grid_state(np.ones((2, 3)), np.full((2, 3), 20), np.zeros((2, 3)), land,
+                        values, None, Affine.identity(), lambda x, y: (x, y), cell_size_m=2, offset=1, limit=1)
+    assert second['next_offset'] is None and second['cells'][0]['hours'][0]['after_utci_c']['max'] == 30.
 
 
 def test_hotspot_excludes_roofs_nan_and_uses_pixel_centers():
@@ -163,7 +225,9 @@ def test_mcp_protocol_discovers_and_calls_tools(service):
                                         'clientInfo': {'name': 'test', 'version': '1'}}, 1)
         assert initialized['serverInfo']['name'] == 'CoolBlocks'
         tools = rpc('tools/list', {}, 2)['tools']
-        assert {t['name'] for t in tools} >= {'get_scene', 'stage_edits', 'run_simulation', 'create_scene'}
+        assert len(tools) == 26
+        assert {t['name'] for t in tools} >= {'get_area_state', 'add_tree', 'remove_building', 'undo_edit'}
+        assert 'find_hotspot' not in {t['name'] for t in tools}
         scene = rpc('tools/call', {'name': 'get_scene', 'arguments': {'session_id': 'browser'}}, 3)
         assert scene.get('isError') is not True
         assert '151.187' in json.dumps(scene)

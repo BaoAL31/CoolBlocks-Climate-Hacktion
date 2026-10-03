@@ -180,14 +180,14 @@ function inside(pt, poly) {  // point-in-polygon (outer ring only)
 function refreshTrees() {
   // existing trees disappear when any remove box covers them; a placed tree only if a LATER remove box covers it
   const removes = state.edits.map((e, i) => (e.type === 'remove_trees' ? [i, e.geometry] : null)).filter(Boolean);
-  const gone = (t) => removes.some(([, g]) => inside([t.lng, t.lat], g));
+  const gone = (t) => removes.some(([, g]) => insideGeom([t.lng, t.lat], g));
   const oldTrees = state.trees.filter((t) => !gone(t)).flatMap((t) => treeModel(t.lng, t.lat, t.height, t.radius, OLD_GREENS));
   const removed = state.trees.filter(gone).map((t) => ({ type: 'Feature', geometry: circle(t.lng, t.lat, t.radius, 14), properties: {} }));
   const sizes = state.area.tree_sizes;
   const newTrees = state.edits.flatMap((e, i) => {
     if (e.type !== 'add_tree') return [];
     const p = e.geometry.coordinates;
-    if (removes.some(([j, g]) => j > i && inside(p, g))) return [];
+    if (removes.some(([j, g]) => j > i && insideGeom(p, g))) return [];
     const [h, r] = sizes[e.size];
     return treeModel(p[0], p[1], h, r, NEW_GREENS);
   });
@@ -199,8 +199,8 @@ function refreshTrees() {
 }
 
 function insideGeom(pt, g) {
-  if (g.type === 'Polygon') return inside(pt, g);
-  if (g.type === 'MultiPolygon') return g.coordinates.some((c) => inside(pt, { coordinates: c }));
+  if (g.type === 'Polygon') return inside(pt, g) && !g.coordinates.slice(1).some((ring) => inside(pt, { coordinates: [ring] }));
+  if (g.type === 'MultiPolygon') return g.coordinates.some((c) => insideGeom(pt, { type: 'Polygon', coordinates: c }));
   return false;
 }
 
@@ -210,6 +210,8 @@ function demolished() {
   state.edits.forEach((e) => {
     if (e.demolish?.idx != null) idx.add(e.demolish.idx);
     if (e.demolish?.edit != null) edits.add(e.demolish.edit);
+    if (e.replaces?.idx != null) idx.add(e.replaces.idx);
+    if (e.replaces?.edit != null) edits.add(e.replaces.edit);
   });
   return { idx, edits };
 }
@@ -517,7 +519,7 @@ $('simulate').onclick = async () => {
   try {
     state.result = await api('simulate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ edits: state.edits.map(({ demolish: _, ...e }) => e), date: state.date || null, hours: state.area.hours }),
+      body: JSON.stringify({ edits: state.edits.map(({ demolish: _, replaces: __, ...e }) => e), date: state.date || null, hours: state.area.hours }),
     });
     showStatus();
     probe();
@@ -573,17 +575,42 @@ document.querySelectorAll('[data-view]').forEach((b) => b.tagName === 'BUTTON' &
     request: api,
     snapshot: () => ({
       date: state.date || null, hour: state.hour,
-      edits: state.edits.map(({ demolish: _, ...edit }) => edit),
+      edits: state.edits.map(({ demolish: _, replaces: __, ...edit }) => edit),
       selected_point: state.probe ? { lon: state.probe.lngLat.lng, lat: state.probe.lngLat.lat } : null,
       map_center: [mapReal.getCenter().lng, mapReal.getCenter().lat],
+      viewport_bounds: [mapReal.getBounds().getWest(), mapReal.getBounds().getSouth(), mapReal.getBounds().getEast(), mapReal.getBounds().getNorth()],
       baseline: state.baseline, result: state.result,
+      map_view: document.querySelector('main').dataset.view,
+      heat_mode: state.heatMode, show_shade: $('shade').checked, show_3d: $('blocks').checked,
+      camera: { center: [mapReal.getCenter().lng, mapReal.getCenter().lat], zoom: mapReal.getZoom(), pitch: mapReal.getPitch(), bearing: mapReal.getBearing() },
+      selected_tool: state.tool,
+      tool_options: { tree_size: $('treeSize').value, surface_type: $('surfaceType').value, building_height: Number($('buildingHeight').value) },
     }),
     apply: (event) => {
       if ('date' in event) { state.date = event.date || ''; $('date').value = state.date; }
       if ('hour' in event) { state.hour = event.hour; $('hour').value = state.hour; }
-      if (event.edits) { state.edits = event.edits; state.result = null; refreshEdits(); }
+      if (event.edits) { state.edits = decorateMcpEdits(event.edits, state.buildings?.features || []); state.result = null; refreshEdits(); }
       if ('baseline' in event) state.baseline = event.baseline;
       if ('result' in event) state.result = event.result;
+      if ('map_view' in event) {
+        document.querySelector('main').dataset.view = event.map_view;
+        document.querySelectorAll('.view-tabs button').forEach((button) => button.classList.toggle('active', button.dataset.view === event.map_view));
+        maps.forEach((map) => map.resize());
+      }
+      if ('heat_mode' in event) {
+        state.heatMode = event.heat_mode;
+        document.querySelectorAll('input[name=heatMode]').forEach((radio) => { radio.checked = radio.value === event.heat_mode; });
+      }
+      if ('show_shade' in event) $('shade').checked = event.show_shade;
+      if ('show_3d' in event) $('blocks').checked = event.show_3d;
+      if ('show_shade' in event || 'show_3d' in event) applyRealToggles();
+      if (event.tool_options) {
+        if (event.tool_options.tree_size) $('treeSize').value = event.tool_options.tree_size;
+        if (event.tool_options.surface_type) $('surfaceType').value = event.tool_options.surface_type;
+        if (event.tool_options.building_height != null) $('buildingHeight').value = event.tool_options.building_height;
+      }
+      if (event.selected_tool) setTool(event.selected_tool);
+      if (event.camera) mapReal.jumpTo(event.camera);
       if (event.selected_point) {
         const map = event.marker_view === 'real' ? mapReal : mapHeat;
         state.probe = { map, lngLat: new maplibregl.LngLat(event.selected_point.lon, event.selected_point.lat) };

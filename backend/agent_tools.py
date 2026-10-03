@@ -65,8 +65,16 @@ class Scene(BaseModel):
     edits: list[dict] = Field(default_factory=list, max_length=100)
     selected_point: dict | None = None
     map_center: list[float] | None = None
+    viewport_bounds: list[float] | None = Field(default=None, min_length=4, max_length=4)
     baseline: dict | None = None
     result: dict | None = None
+    map_view: Literal['real', 'heat'] = 'real'
+    heat_mode: Literal['heat', 'change'] = 'heat'
+    show_shade: bool = True
+    show_3d: bool = False
+    camera: dict | None = None
+    selected_tool: str = 'pan'
+    tool_options: dict = Field(default_factory=dict)
 
     @model_validator(mode='after')
     def valid_date(self):
@@ -90,6 +98,7 @@ class SessionArgs(ToolArgs):
 class FeatureArgs(ToolArgs):
     kind: Literal['buildings', 'trees']
     limit: int = Field(default=50, ge=1, le=200)
+    offset: int = Field(default=0, ge=0)
     bbox: list[float] | None = Field(default=None, min_length=4, max_length=4,
                                    description='Optional west,south,east,north in lon/lat')
 
@@ -101,6 +110,62 @@ class PointArgs(SessionArgs):
 
 class MarkerArgs(PointArgs):
     view: Literal['real', 'heat'] = 'heat'
+
+
+class AreaStateArgs(SessionArgs):
+    bbox: list[float] | None = Field(default=None, min_length=4, max_length=4)
+    cell_size_m: int = Field(default=50, ge=1, le=200)
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=32, ge=1, le=64)
+    hours: list[int] | None = Field(default=None, min_length=1, max_length=3)
+
+
+class AddTreeArgs(PointArgs):
+    size: Literal['small', 'medium', 'large'] = 'medium'
+
+
+class TreeTargetArgs(SessionArgs):
+    tree_id: str = Field(description='tree:<index> from get_features or draft:<index> from get_scene')
+
+
+class GeometryArgs(SessionArgs):
+    geometry: dict
+
+
+class SurfaceArgs(GeometryArgs):
+    surface: Literal['paving', 'asphalt', 'grass', 'soil', 'water', 'cool_asphalt']
+
+
+class AddBuildingArgs(GeometryArgs):
+    height: float = Field(ge=1, le=250, allow_inf_nan=False)
+
+
+class BuildingTargetArgs(SessionArgs):
+    building_id: str = Field(description='building:<idx> from get_features or draft:<index> from get_scene')
+
+
+class BuildingHeightArgs(BuildingTargetArgs):
+    height: float = Field(ge=0, le=250, allow_inf_nan=False)
+
+
+class ViewArgs(SessionArgs):
+    map_view: Literal['real', 'heat'] | None = None
+    heat_mode: Literal['heat', 'change'] | None = None
+    show_shade: bool | None = None
+    show_3d: bool | None = None
+
+
+class CameraArgs(PointArgs):
+    zoom: float | None = Field(default=None, ge=0, le=22, allow_inf_nan=False)
+    pitch: float | None = Field(default=None, ge=0, le=85, allow_inf_nan=False)
+    bearing: float | None = Field(default=None, ge=-360, le=360, allow_inf_nan=False)
+
+
+class SelectToolArgs(SessionArgs):
+    tool: Literal['pan', 'probe', 'tree', 'remove_trees', 'surface', 'building', 'demolish']
+    tree_size: Literal['small', 'medium', 'large'] | None = None
+    surface_type: Literal['paving', 'asphalt', 'grass', 'soil', 'water', 'cool_asphalt'] | None = None
+    building_height: float | None = Field(default=None, ge=0, le=250, allow_inf_nan=False)
 
 
 class EditsArgs(SessionArgs):
@@ -134,10 +199,22 @@ TOOLS = {
     'get_weather': (SessionArgs, 'Read weather for the scene’s date, including whether weather is a fallback.'),
     'get_baseline': (SessionArgs, 'Calculate/read the baseline and return hourly heat metrics. Updates the connected map.'),
     'inspect_point': (PointArgs, 'Read modelled UTCI, surface and shade at a lon/lat point for the selected hour and scenario.'),
-    'find_hotspot': (SessionArgs, 'Find the maximum ground-level UTCI for the selected date/hour and current scenario; excludes roofs and invalid cells.'),
+    'get_area_state': (AreaStateArgs, 'Read paginated spatial cells: exact heat ranges/coordinates, shade, surfaces, buildings and canopy. Agent reasons across cells. Use next_offset and bbox for detailed inspection.'),
     'place_temperature_marker': (MarkerArgs, 'Place the temperature popup at a coordinate in the connected map, with before/after UTCI and shade.'),
     'stage_edits': (EditsArgs, 'Replace the browser’s draft with validated edits; include existing edits if retaining them. Changes are reversible simulation drafts.'),
     'run_simulation': (SimulateArgs, 'Simulate the current draft before/after; return measured changes and display result images in the browser.'),
+    'add_tree': (AddTreeArgs, 'Append a tree at lon/lat to the existing draft. Does not discard other edits.'),
+    'remove_tree': (TreeTargetArgs, 'Remove one existing tree by stable feature ID, using its crown footprint.'),
+    'remove_trees': (GeometryArgs, 'Remove canopy within a GeoJSON polygon.'),
+    'add_building': (AddBuildingArgs, 'Add a hypothetical building footprint with height in metres.'),
+    'set_building_height': (BuildingHeightArgs, 'Change an existing/draft building height by feature ID.'),
+    'remove_building': (BuildingTargetArgs, 'Demolish an existing/draft building by ID; staged and reversible.'),
+    'change_surface': (SurfaceArgs, 'Change ground surface in a polygon; roofs are protected.'),
+    'undo_edit': (SessionArgs, 'Undo the last draft edit; clears stale simulation results.'),
+    'clear_edits': (SessionArgs, 'Clear all draft edits and stale simulation results.'),
+    'set_map_view': (ViewArgs, 'Set real/heat view, temperature/change mode, shade and 3D-model visibility.'),
+    'set_camera': (CameraArgs, 'Pan, zoom, rotate or tilt the connected maps.'),
+    'select_tool': (SelectToolArgs, 'Select a UI tool and its tree/surface/building options.'),
 }
 
 GUIDANCE = (
@@ -148,6 +225,8 @@ GUIDANCE = (
     'Report weather_source; fallback hot day is synthetic weather. Tree heights are assumed, '
     'OSM building heights may be estimated, and absolute temperatures are model estimates. '
     'Reflective pavement can increase pedestrian heat; simulate rather than assume cooling. '
+    'Use get_area_state to reason about the spatial distribution; follow pagination, then query a smaller bbox '
+    'at finer resolution if needed. Cell maxima are exact pixels, not inferred from images. '
     'Never plant on roofs. Make only changes requested by the user. If their location is ambiguous, '
     'ask them to select a point. All edits are hypothetical; source rasters remain unchanged.'
 )
@@ -209,7 +288,7 @@ class AgentTools:
             if 'edits' in payload:
                 session['scene']['edits'] = payload['edits']
                 session['scene']['result'] = None
-            for key in ('date', 'hour'):
+            for key in ('date', 'hour', 'map_view', 'heat_mode', 'show_shade', 'show_3d', 'camera', 'selected_tool', 'tool_options'):
                 if key in payload:
                     session['scene'][key] = payload[key]
             if 'selected_point' in payload:
@@ -228,7 +307,8 @@ class AgentTools:
             except (KeyError, TypeError, ValueError) as error:
                 raise ValueError('Invalid GeoJSON geometry') from error
             required = 'Point' if edit.type == 'add_tree' else 'Polygon'
-            if geometry.geom_type != required or geometry.is_empty or not geometry.is_valid:
+            allowed = ('Point',) if edit.type == 'add_tree' else ('Polygon', 'MultiPolygon')
+            if geometry.geom_type not in allowed or geometry.is_empty or not geometry.is_valid:
                 raise ValueError(f'{edit.type} requires a valid {required}')
             if edit.type == 'surface' and edit.surface is None:
                 raise ValueError('Surface edit needs a surface')
@@ -242,6 +322,27 @@ class AgentTools:
             if edit.type == 'add_tree' and 'is_roof' in self.api and self.api['is_roof'](*edit.geometry['coordinates'][:2]):
                 raise ValueError('Cannot plant a tree on a roof')
         return [e.model_dump() for e in validated]
+
+    def features(self, kind):
+        features = copy.deepcopy(self.api[kind]()['features'])
+        for index, feature in enumerate(features):
+            feature['id'] = f"{'building' if kind == 'buildings' else 'tree'}:{index}"
+        return features
+
+    def target_building(self, identifier, scene):
+        prefix, separator, raw_index = identifier.partition(':')
+        if not separator or not raw_index.isdigit():
+            raise ValueError('Building ID must be building:<index> or draft:<index>')
+        index = int(raw_index)
+        if prefix == 'building':
+            features = self.features('buildings')
+            if index < len(features):
+                return features[index]['geometry']
+        if prefix == 'draft' and index < len(scene['edits']):
+            edit = scene['edits'][index]
+            if edit['type'] == 'building' and (edit.get('height') or 0) > 0:
+                return edit['geometry']
+        raise ValueError('Building ID not found')
 
     def dispatch(self, name, arguments):
         if name not in TOOLS:
@@ -262,19 +363,25 @@ class AgentTools:
         if name == 'get_area':
             return {**self.api['area'](), 'interpretation': GUIDANCE}
         if name == 'get_features':
-            features = self.api[args.kind]() ['features']
+            features = self.features(args.kind)
             if args.bbox:
                 w, s, e, n = args.bbox
                 if not all(math.isfinite(v) for v in args.bbox) or w >= e or s >= n:
                     raise ValueError('bbox must be west,south,east,north')
                 from shapely.geometry import box
                 features = [f for f in features if shape(f['geometry']).intersects(box(w, s, e, n))]
-            return {'type': 'FeatureCollection', 'total_matches': len(features), 'features': features[:args.limit],
-                    'truncated': len(features) > args.limit}
+            page = features[args.offset:args.offset + args.limit]
+            return {'type': 'FeatureCollection', 'total_matches': len(features), 'features': page,
+                    'offset': args.offset, 'next_offset': args.offset + len(page) if args.offset + len(page) < len(features) else None,
+                    'truncated': args.offset + len(page) < len(features)}
         with self.lock:
             scene = copy.deepcopy(self.session(args.session_id)['scene'])
         if name == 'get_scene':
-            return {**scene, 'session_id': args.session_id, 'interpretation': GUIDANCE}
+            with self.lock:
+                pending = len(self.session(args.session_id)['actions'])
+            return {**scene, 'session_id': args.session_id, 'pending_browser_actions': pending, 'interpretation': GUIDANCE,
+                    'draft_buildings': [{'building_id': f'draft:{index}', **edit} for index, edit in enumerate(scene['edits']) if edit['type'] == 'building'],
+                    'draft_trees': [{'tree_id': f'draft:{index}', **edit} for index, edit in enumerate(scene['edits']) if edit['type'] == 'add_tree']}
         if name == 'set_time':
             if args.date:
                 date.fromisoformat(args.date)
@@ -282,9 +389,73 @@ class AgentTools:
             return {'date': args.date, 'hour': args.hour, 'status': 'time changed; compute a baseline for this date'}
         if name == 'get_weather':
             return self.api['weather'](date=scene['date'])
-        if name == 'find_hotspot':
-            return self.api['hotspot'](date=scene['date'], hour=scene['hour'],
-                                       sim_id=(scene['result'] or {}).get('sim_id'))
+        if name == 'get_area_state':
+            if args.bbox and (not all(math.isfinite(v) for v in args.bbox) or args.bbox[0] >= args.bbox[2] or args.bbox[1] >= args.bbox[3]):
+                raise ValueError('bbox must be west,south,east,north')
+            hours = sorted(set(args.hours or [scene['hour']]))
+            if any(hour not in self.api['area']()['hours'] for hour in hours):
+                raise ValueError('Area-state hours must be 9–18')
+            result = self.api['area_state'](date=scene['date'], hours=hours, sim_id=(scene['result'] or {}).get('sim_id'),
+                                           bbox=args.bbox, cell_size_m=args.cell_size_m, offset=args.offset, limit=args.limit)
+            return {**result, 'scene_revision': scene['revision'], 'draft_edits': scene['edits'],
+                    'draft_note': 'Unsimulated drafts are listed separately and are not applied to spatial data.',
+                    'interpretation': GUIDANCE}
+        if name in ('set_map_view', 'set_camera', 'select_tool'):
+            if name == 'set_map_view':
+                payload = args.model_dump(exclude={'session_id'}, exclude_none=True)
+                if not payload:
+                    raise ValueError('Provide at least one view setting')
+            elif name == 'set_camera':
+                payload = {'camera': {'center': [args.lon, args.lat], **args.model_dump(exclude={'session_id', 'lon', 'lat'}, exclude_none=True)}}
+            else:
+                options = {**scene['tool_options'], **args.model_dump(exclude={'session_id', 'tool'}, exclude_none=True)}
+                payload = {'selected_tool': args.tool, 'tool_options': options}
+            self._queue(args.session_id, scene['revision'], payload)
+            return {'status': 'queued for browser', **payload}
+        if name in ('add_tree', 'remove_tree', 'remove_trees', 'add_building', 'set_building_height', 'remove_building', 'change_surface', 'undo_edit', 'clear_edits'):
+            edits = list(scene['edits'])
+            if name == 'add_tree':
+                edit = {'type': 'add_tree', 'size': args.size, 'geometry': {'type': 'Point', 'coordinates': [args.lon, args.lat]}}
+            elif name == 'remove_tree':
+                feature = next((f for f in self.features('trees') if f['id'] == args.tree_id), None)
+                if feature is None and args.tree_id.startswith('draft:') and args.tree_id[6:].isdigit():
+                    index = int(args.tree_id[6:])
+                    if index < len(edits) and edits[index]['type'] == 'add_tree':
+                        tree = edits[index]
+                        feature = {'geometry': tree['geometry'], 'properties': {'radius': {'small': 3, 'medium': 4, 'large': 6}[tree['size']]}}
+                if feature is None:
+                    raise ValueError('Tree ID not found')
+                from pyproj import Transformer
+                from shapely.ops import transform
+                forward = Transformer.from_crs('EPSG:4326', 'EPSG:7856', always_xy=True).transform
+                inverse = Transformer.from_crs('EPSG:7856', 'EPSG:4326', always_xy=True).transform
+                crown = transform(forward, shape(feature['geometry'])).buffer(feature['properties']['radius'])
+                from shapely.geometry import mapping
+                from shapely.geometry import box
+                (w, s), (e, n) = self.api['area']()['bounds']
+                edit = {'type': 'remove_trees', 'geometry': mapping(transform(inverse, crown).intersection(box(w, s, e, n)))}
+            elif name == 'remove_trees':
+                edit = {'type': 'remove_trees', 'geometry': args.geometry}
+            elif name == 'add_building':
+                edit = {'type': 'building', 'height': args.height, 'geometry': args.geometry}
+            elif name in ('set_building_height', 'remove_building'):
+                edit = {'type': 'building', 'height': args.height if name == 'set_building_height' else 0,
+                        'geometry': self.target_building(args.building_id, scene)}
+            elif name == 'change_surface':
+                edit = {'type': 'surface', 'surface': args.surface, 'geometry': args.geometry}
+            elif name == 'undo_edit':
+                if not edits:
+                    raise ValueError('No edit to undo')
+                edits.pop()
+            else:
+                edits = []
+            if name not in ('undo_edit', 'clear_edits'):
+                edits.append(edit)
+            if len(edits) > 100:
+                raise ValueError('At most 100 draft edits are supported')
+            edits = self.validate_edits(edits)
+            self._queue(args.session_id, scene['revision'], {'edits': edits})
+            return {'status': 'draft; not yet simulated', 'edit_count': len(edits), 'edits': edits}
         if name == 'get_baseline':
             result = self.api['baseline'](date=scene['date'])
             self._queue(args.session_id, scene['revision'], {'baseline': result})

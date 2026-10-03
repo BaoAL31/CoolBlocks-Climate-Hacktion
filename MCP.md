@@ -51,10 +51,21 @@ including entering the MCP session manager in the parent application's lifespan.
 | `get_weather` | Selected day's weather and fallback provenance |
 | `get_baseline` | Calculate baseline heat and display it in a connected browser |
 | `inspect_point` | UTCI, surface and shade before/after at a coordinate |
-| `find_hotspot` | Hottest finite ground-level UTCI cell for the selected time/scenario |
+| `get_area_state` | Paginated spatial cells with heat, shade, surfaces, elevations, buildings, canopy and exact maximum-pixel coordinates |
 | `place_temperature_marker` | Display a temperature popup at a coordinate on the real/heat map |
 | `stage_edits` | Replace hypothetical draft edits; an empty list clears them |
 | `run_simulation` | Before/after calculation, measured changes and browser result overlays |
+| `add_tree` | Append a small/medium/large tree at a coordinate |
+| `remove_tree` | Remove canopy within an existing/drafted tree's modelled crown |
+| `remove_trees` | Remove canopy within a polygon |
+| `add_building` | Append a footprint and height |
+| `set_building_height` | Set an existing/drafted building's height by ID |
+| `remove_building` | Stage demolition by building ID |
+| `change_surface` | Append a polygon surface change |
+| `undo_edit`, `clear_edits` | Undo the last draft or clear all drafts |
+| `set_map_view` | Real/heat view, temperature/change, shade and 3D visibility |
+| `set_camera` | Pan, zoom, rotate and tilt |
+| `select_tool` | Select a UI tool and its options |
 
 Read `coolblocks://model-guide` for units, assumptions and interpretation. Tools
 return compact numerical evidence; image payloads are sent only to the browser.
@@ -66,9 +77,27 @@ Typical agent workflow:
 1. Call `get_status`, `get_area`, and `list_sessions`.
 2. Choose the user's browser session, then call `get_scene`. If working independently,
    use `create_scene` and the returned session ID instead.
-3. Use the selected point or actual `get_features` coordinates; do not invent locations.
-4. Inspect weather and baseline/point metrics before explaining the heat.
-5. For requested changes, call `stage_edits`, then `run_simulation` and inspect measured deltas.
+3. Read `get_area_state` for the selected hour. Follow `next_offset` to read the whole area, compare temperature
+   distributions with shade, canopy and surfaces, and refine a bounding box to smaller cells for local detail.
+   Each cell reports exact maximum-pixel coordinates, so the agent can locate the hottest ground point from the
+   data without a dedicated hotspot tool. Do not infer temperatures from rendered colors.
+4. Use paginated `get_features` for actual footprints and stable `building:<index>`/`tree:<index>` IDs.
+   Drafted features are identified by `draft:<edit index>` in `get_scene`.
+5. Use named tools such as `add_tree`, `remove_building` or `change_surface` for requested changes. They append
+   to the current draft. `stage_edits` remains available for advanced batch replacement.
+6. Call `run_simulation`, then read `get_area_state` again to compare measured heat/shade changes spatially.
+
+`get_area_state` defaults to 50m cells, 32 cells per page, and the selected hour. It accepts an optional
+`bbox: [west,south,east,north]`, `cell_size_m` from 1 to 200, `offset`, `limit` up to 64, and up to 3 hours.
+Cells aggregate native 1m data; they contain surface areas, building and canopy heights, elevation, shaded
+fractions, before/after UTCI statistics and exact maximum-ground-point coordinates. Rooftops and invalid
+values are excluded from pedestrian heat statistics. Change statistics compare cells that are ground both
+before and after, so newly created/removed roofs do not distort pedestrian deltas. Unsimulated drafts are
+listed separately and are not silently presented as computed results.
+
+Geometry and scene changes remain version checked. `pending_browser_actions` in `get_scene` distinguishes
+queued controls from actions acknowledged by the browser. Re-read the scene before using draft IDs after
+undo/clear: their indices can change. Tree crown removal is model-based and can affect overlapping canopy.
 
 Example draft tree (coordinates must be inside the study area and off roofs):
 

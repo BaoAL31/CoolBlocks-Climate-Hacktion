@@ -34,7 +34,9 @@ function startMcpSync({ snapshot, apply, request, status }) {
           apply(event);
           revision += 1;
           previous = JSON.stringify(summarize(snapshot()));
-          const change = event.selected_point ? 'a temperature marker' : event.edits ? 'draft edits' : 'date' in event || 'hour' in event ? 'the selected time'
+          const change = event.selected_point ? 'a temperature marker' : event.edits ? 'draft edits' : event.camera ? 'the map camera'
+            : event.selected_tool ? 'the selected tool' : 'map_view' in event || 'heat_mode' in event || 'show_shade' in event || 'show_3d' in event ? 'map display settings'
+            : 'date' in event || 'hour' in event ? 'the selected time'
             : event.result ? 'simulation results' : 'baseline heat map';
           status(`Agent applied ${change}.`);
         }
@@ -53,4 +55,19 @@ function startMcpSync({ snapshot, apply, request, status }) {
   return { sessionId, sync: tick, stop() { stopped = true; clearInterval(timer); } };
 }
 
-if (typeof module !== 'undefined') module.exports = { startMcpSync };
+function decorateMcpEdits(edits, buildings) {
+  return edits.map((edit, index) => {
+    if (edit.type !== 'building') return edit;
+    const key = JSON.stringify(edit.geometry);
+    const building = buildings.find((feature) => JSON.stringify(feature.geometry) === key);
+    let prior = -1;
+    for (let i = index - 1; i >= 0; i--) {
+      if (edits[i].type === 'building' && edits[i].height > 0 && JSON.stringify(edits[i].geometry) === key) { prior = i; break; }
+    }
+    const target = { ...(building ? { idx: building.properties.idx } : {}), ...(prior >= 0 ? { edit: prior } : {}) };
+    if (!Object.keys(target).length) return edit;
+    return { ...edit, [edit.height > 0 ? 'replaces' : 'demolish']: target };
+  });
+}
+
+if (typeof module !== 'undefined') module.exports = { startMcpSync, decorateMcpEdits };

@@ -54,7 +54,7 @@ from rasterio.warp import transform_geom
 import live_weather
 from agent_tools import AgentTools, serialized_compute
 from agent_routes import install_agents
-from heat_analysis import hottest_ground_point
+from area_state import grid_state
 
 logging.getLogger("solweig").setLevel(logging.WARNING)
 log = logging.getLogger("coolblocks")
@@ -479,7 +479,7 @@ def simulate(req: SimRequest):
                 item["shadow_png"] = _shadow_png(np.where(newly_shaded, after[h]["shadow"], 1.0), roofs)
         hours.append(item)
     sim_id = uuid.uuid4().hex[:12]
-    _SIMS[sim_id] = {"date": req.date, "r0": r0, "c0": c0, "lc": lc1,
+    _SIMS[sim_id] = {"date": req.date, "r0": r0, "c0": c0, "lc": lc1, "dsm": dsm1, "cdsm": cdsm1,
                      "hours": {h: {"utci": after[h]["utci"], "shadow": after[h]["shadow"]} for h in after}}
     while len(_SIMS) > 8:
         _SIMS.pop(next(iter(_SIMS)))
@@ -526,33 +526,49 @@ def _is_roof(lon, lat):
 
 
 @serialized_compute
-def _find_hotspot(date, hour, sim_id=None):
-    baseline(date)
-    base = _BASE.get(date, {}).get(hour)
-    if base is None:
-        raise HTTPException(409, 'No temperatures for this hour')
-    utci, landcover = base['utci'].copy(), AREA.lc.copy()
-    scenario = 'baseline'
+def _read_area_state(date, hours, sim_id=None, bbox=None, cell_size_m=50, offset=0, limit=32):
+    metadata = baseline(date)
+    before = {hour: _BASE[date][hour] for hour in hours if hour in _BASE[date]}
+    if len(before) != len(hours):
+        raise HTTPException(409, 'Requested hours are not available in the baseline')
+    lc, dsm, canopy = AREA.lc.copy(), AREA.dsm.copy(), AREA.cdsm.copy()
+    after = None
     if sim_id:
         sim = _SIMS.get(sim_id)
-        if not sim or sim['date'] != date or hour not in sim['hours']:
-            raise HTTPException(409, 'Scenario results expired or do not cover this hour; simulate again')
-        values = sim['hours'][hour]['utci']
+        if not sim or sim['date'] != date or any(hour not in sim['hours'] for hour in hours):
+            raise HTTPException(409, 'Scenario does not cover the requested hours; simulate those hours first')
+        after = {hour: {'utci': value['utci'].copy(), 'shadow': value['shadow'].copy()} for hour, value in before.items()}
         r, c = sim['r0'], sim['c0']
-        window = (slice(r, r + values.shape[0]), slice(c, c + values.shape[1]))
-        utci[window], landcover[window] = values, sim['lc']
-        scenario = 'after edits'
-    hottest = hottest_ground_point(utci, landcover, AREA.transform, AREA.to_lonlat.transform)
-    inspected = point(hottest['lon'], hottest['lat'], hour, date, sim_id)
-    return {**hottest, **inspected, 'date': date, 'scenario': scenario,
-            'metric': 'maximum ground-level UTCI at the selected hour'}
+        sample = sim['lc']
+        win = (slice(r, r + sample.shape[0]), slice(c, c + sample.shape[1]))
+        lc[win], dsm[win], canopy[win] = sample, sim['dsm'], sim['cdsm']
+        for hour in hours:
+            for field in ('utci', 'shadow'):
+                after[hour][field][win] = sim['hours'][hour][field]
+    window = None
+    if bbox:
+        w, s, e, n = bbox
+        polygon = {'type': 'Polygon', 'coordinates': [[[w, s], [e, s], [e, n], [w, n], [w, s]]]}
+        xy = np.array(_all_xy(_to_area_crs(polygon)))
+        columns, rows = ~AREA.transform * (xy[:, 0], xy[:, 1])
+        r0, r1 = max(0, int(np.floor(rows.min()))), min(AREA.h, int(np.ceil(rows.max())))
+        c0, c1 = max(0, int(np.floor(columns.min()))), min(AREA.w, int(np.ceil(columns.max())))
+        if r0 >= r1 or c0 >= c1:
+            raise HTTPException(400, 'Bounding box is outside the study area')
+        window = (r0, r1, c0, c1)
+    result = grid_state(AREA.dem, dsm, canopy, lc, before, after, AREA.transform,
+                        AREA.to_lonlat.transform, window, cell_size_m, offset, limit, before_landcover=AREA.lc)
+    return {**result, 'date': date, 'hours_requested': hours, 'weather_source': metadata['weather_source'],
+            'air_temperature_c_by_hour': {item['hour']: item['air_temp'] for item in metadata['hours'] if item['hour'] in hours},
+            'scenario': 'after edits' if after else 'baseline', 'sim_id': sim_id,
+            'data_source': AREA.source, 'study_bounds': AREA.bounds_lonlat()}
 
 
 AGENT_TOOLS = AgentTools(
     {'area': area, 'buildings': buildings, 'trees': trees, 'weather': weather,
      'baseline': baseline, 'simulate': simulate, 'point': point, 'is_roof': _is_roof,
      'backend': lambda: getattr(solweig, 'get_compute_backend', lambda: 'unknown')(),
-     'hotspot': _find_hotspot}, Edit, SimRequest,
+     'area_state': _read_area_state}, Edit, SimRequest,
 )
 MCP = install_agents(app, AGENT_TOOLS)
 
