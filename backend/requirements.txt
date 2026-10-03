@@ -1,0 +1,10 @@
+solweig>=0.1.0b96
+fastapi
+uvicorn
+rasterio
+pyproj
+matplotlib
+requests
+numpy
+shapely
+tzdata  # time zones on Windows
