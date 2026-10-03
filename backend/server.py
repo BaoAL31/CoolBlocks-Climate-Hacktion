@@ -28,6 +28,7 @@ import io
 import json
 import logging
 import os
+import threading
 import tempfile
 import uuid
 from datetime import date as Date
@@ -327,6 +328,23 @@ def _apply_edits(edits, dsm, dem, cdsm, lc, transform):
 
 app = FastAPI(title="CoolBlocks API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+@app.on_event("startup")
+def _warm_up():
+    """On a hosted server, work out the heat maps for the example day and today in the background,
+    so the first visitor doesn't wait. Set COOLBLOCKS_WARMUP=1 to turn this on (the Dockerfile does)."""
+    if os.environ.get("COOLBLOCKS_WARMUP") != "1":
+        return
+
+    def run():
+        for day in ("2025-12-19", None):
+            try:
+                _baseline(day, tuple(DEFAULT_HOURS))
+            except Exception as e:  # never stop the server over a warm-up
+                print(f"coolblocks: warm-up for {day or 'today'} failed ({e})")
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 @app.get("/api/area")
