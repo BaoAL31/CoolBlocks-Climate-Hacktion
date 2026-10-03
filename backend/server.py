@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import tempfile
+import uuid
 from datetime import date as Date
 from datetime import datetime
 from pathlib import Path
@@ -74,8 +75,8 @@ class Area:
             with rasterio.open(DATA / "dsm.tif") as r:
                 self.dsm, self.transform = r.read(1).astype(np.float32), r.transform
             self.dem = _read(DATA / "dem.tif", np.float32) if (DATA / "dem.tif").exists() else None
-            self.cdsm = _read(DATA / "cdsm.tif", np.float32)
             self.lc = _read(DATA / "landcover.tif", np.int32)
+            self.cdsm = self._load_trees()
             self.source = "data/area"
         else:
             self._synthetic()
@@ -85,6 +86,28 @@ class Area:
             self.dem = np.where(np.isnan(self.dem), np.nanmedian(self.dem), self.dem).astype(np.float32)
         self.h, self.w = self.dsm.shape
         self.to_lonlat = Transformer.from_crs(CRS, "EPSG:4326", always_xy=True)
+
+    def _load_trees(self):
+        """Tree heights. cdsm.tif isn't committed (canopy licence forbids sharing derived data), so it is rebuilt
+        from the committed canopy cut-out data/raw/canopy_usyd.tif the first time the server starts."""
+        path = DATA / "cdsm.tif"
+        if path.exists():
+            return _read(path, np.float32)
+        canopy = DATA.parent / "raw" / "canopy_usyd.tif"
+        if not canopy.exists():
+            log.warning("no cdsm.tif and no %s: existing trees left out", canopy)
+            return np.zeros(self.dsm.shape, np.float32)
+        import sys
+        sys.path.insert(0, str(HERE / "scripts"))
+        from build_area import canopy_to_cdsm
+
+        cdsm = canopy_to_cdsm(str(canopy), self.transform, self.dsm.shape, self.lc)
+        with rasterio.open(DATA / "dsm.tif") as r:
+            profile = r.profile
+        with rasterio.open(path, "w", **(profile | {"dtype": "float32", "nodata": None})) as dst:
+            dst.write(cdsm, 1)
+        log.warning("built %s from %s (canopy cover %.0f%%)", path, canopy, 100 * (cdsm > 0).mean())
+        return cdsm
 
     def _synthetic(self):
         """400 x 400 m block centred on USYD: buildings, an E-W road, a park with trees."""
@@ -323,11 +346,33 @@ def _vectors():
         feats = [{"type": "Feature", "properties": {"height": float(v)}, "geometry": transform_geom(CRS, "EPSG:4326", g)}
                  for g, v in shapes(height.astype(np.float32), mask=(AREA.lc == 2) & (height > 2), transform=AREA.transform)]
         buildings = {"type": "FeatureCollection", "features": feats}
-    tree_h = np.where(AREA.cdsm > 1, np.round(AREA.cdsm / 2) * 2, 0).astype(np.float32)  # 2 m bands keep it light
-    trees = {"type": "FeatureCollection", "features": [
-        {"type": "Feature", "properties": {"height": float(v)}, "geometry": transform_geom(CRS, "EPSG:4326", g)}
-        for g, v in shapes(tree_h, mask=tree_h > 0, transform=AREA.transform)]}
-    return buildings, trees
+    for i, f in enumerate(buildings["features"]):
+        f.setdefault("properties", {})["idx"] = i  # lets the frontend hide a demolished building
+    return buildings, _tree_points(AREA.cdsm, AREA.transform)
+
+
+def _tree_points(cdsm, transform, min_height=3.0, spacing=5):
+    """Individual trees as points (top of each crown), so the frontend can draw a tree shape for each.
+
+    A tree top is a cell that is the tallest within `spacing` cells. Crown radius is guessed from height."""
+    h = np.nan_to_num(cdsm.astype(np.float32))
+    k = 2 * spacing + 1
+    win = np.lib.stride_tricks.sliding_window_view(np.pad(h, spacing, constant_values=0), (k, k))
+    local_max = win.max(axis=(2, 3))
+    rows, cols = np.nonzero((h >= min_height) & (h >= local_max))
+    taken = np.zeros_like(h, dtype=bool)  # flat-topped crowns give ties: keep one per spacing window
+    to_ll = Transformer.from_crs(CRS, "EPSG:4326", always_xy=True).transform
+    feats = []
+    for r, c in zip(rows, cols):
+        if taken[r, c]:
+            continue
+        taken[max(0, r - spacing):r + spacing + 1, max(0, c - spacing):c + spacing + 1] = True
+        x, y = transform * (c + 0.5, r + 0.5)
+        lon, lat = to_ll(x, y)
+        height = float(round(h[r, c], 1))
+        feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(lon, 7), round(lat, 7)]},
+                      "properties": {"height": height, "radius": round(float(np.clip(0.35 * height, 2, 7)), 1)}})
+    return {"type": "FeatureCollection", "features": feats}
 
 
 @app.get("/api/buildings")
@@ -347,12 +392,19 @@ def weather(date: str | None = None):
             "hours": [{"hour": w.datetime.hour, "air_temp": w.ta, "humidity": w.rh, "sun_wm2": w.global_rad} for w in ws]}
 
 
+_BASE: dict = {}  # day -> {hour: {"utci", "shadow", "ta"}} full-area arrays, for /simulate shade redraws and /point
+_SIMS: dict = {}  # sim_id -> patch results of a recent /simulate, for /point after edits
+
+
 @functools.lru_cache(maxsize=4)
 def _baseline(day: str | None, hours: tuple[int, ...]):
     ws, offset, src = get_weather(day, list(hours))
     res = _run(f"baseline_{day or 'live'}", AREA.dsm, AREA.dem, AREA.cdsm, AREA.lc, ws, _location(offset))
     roofs = AREA.lc == 2
     out = []
+    _BASE[day] = {w.datetime.hour: {**res[w.datetime.hour], "ta": w.ta} for w in ws}
+    while len(_BASE) > 4:  # same limit as the cache above
+        _BASE.pop(next(iter(_BASE)))
     for w in ws:
         h = w.datetime.hour
         u = res[h]["utci"]
@@ -411,10 +463,55 @@ def simulate(req: SimRequest):
             unchanged = roofs | (np.abs(d) < 0.2)
             item["utci_png"] = _png(np.where(unchanged, np.nan, ua), "inferno", *UTCI_RANGE)
             item["change_png"] = _png(np.where(unchanged, np.nan, d), "RdBu_r", -CHANGE_RANGE, CHANGE_RANGE)
-            newly_shaded = after[h]["shadow"] < before[h]["shadow"] - 0.1
-            item["shadow_png"] = _shadow_png(np.where(newly_shaded, after[h]["shadow"], 1.0), roofs)
+            base_shadow = _BASE.get(req.date, {}).get(h, {}).get("shadow")
+            if base_shadow is not None:
+                # whole-area shade map with the edited patch swapped in, so removed trees lose their shadow too
+                full, full_roofs = base_shadow.copy(), AREA.lc == 2
+                full[win], full_roofs[win] = after[h]["shadow"], roofs
+                item["shadow_full_png"] = _shadow_png(full, full_roofs)
+            else:  # baseline not computed for this day: draw only the new shade on top
+                newly_shaded = after[h]["shadow"] < before[h]["shadow"] - 0.1
+                item["shadow_png"] = _shadow_png(np.where(newly_shaded, after[h]["shadow"], 1.0), roofs)
         hours.append(item)
-    return {"weather_source": src, "bounds": AREA.bounds_lonlat(r0, r1, c0, c1), "hours": hours}
+    sim_id = uuid.uuid4().hex[:12]
+    _SIMS[sim_id] = {"date": req.date, "r0": r0, "c0": c0, "lc": lc1,
+                     "hours": {h: {"utci": after[h]["utci"], "shadow": after[h]["shadow"]} for h in after}}
+    while len(_SIMS) > 8:
+        _SIMS.pop(next(iter(_SIMS)))
+    return {"sim_id": sim_id, "weather_source": src, "bounds": AREA.bounds_lonlat(r0, r1, c0, c1), "hours": hours}
+
+
+SURFACE_NAMES = {0: "paving", 1: "dark asphalt", 2: "roof", 3: "cool asphalt", 5: "grass", 6: "bare soil", 7: "water"}
+
+
+@app.get("/api/point")
+def point(lon: float, lat: float, hour: int, date: str | None = None, sim_id: str | None = None):
+    """'Feels like' temperature at one spot: before edits (from the baseline) and after (from a /simulate result)."""
+    base = _BASE.get(date, {}).get(hour)
+    if base is None:
+        raise HTTPException(409, "heat map for this day isn't ready yet")
+    x, y = Transformer.from_crs("EPSG:4326", CRS, always_xy=True).transform(lon, lat)
+    c, r = ~AREA.transform * (x, y)
+    r, c = int(r), int(c)
+    if not (0 <= r < AREA.h and 0 <= c < AREA.w):
+        raise HTTPException(404, "outside the study area")
+
+    def num(v):
+        return None if v is None or not np.isfinite(v) else round(float(v), 1)
+
+    out = {"hour": hour, "air_temp": num(base["ta"]), "before": num(base["utci"][r, c]),
+           "shade_before": bool(base["shadow"][r, c] < 0.5), "surface": SURFACE_NAMES.get(int(AREA.lc[r, c]), "other"),
+           "surface_before": SURFACE_NAMES.get(int(AREA.lc[r, c]), "other"), "after": None, "shade_after": None}
+    sim = _SIMS.get(sim_id) if sim_id else None
+    if sim and sim["date"] == date and hour in sim["hours"]:
+        a = sim["hours"][hour]
+        pr, pc = r - sim["r0"], c - sim["c0"]
+        if 0 <= pr < a["utci"].shape[0] and 0 <= pc < a["utci"].shape[1]:
+            out.update(after=num(a["utci"][pr, pc]), shade_after=bool(a["shadow"][pr, pc] < 0.5),
+                       surface=SURFACE_NAMES.get(int(sim["lc"][pr, pc]), "other"))
+        else:  # outside the edited patch: nothing changed there
+            out.update(after=out["before"], shade_after=out["shade_before"])
+    return out
 
 
 # Serve the frontend from the same server (http://127.0.0.1:8000/)
