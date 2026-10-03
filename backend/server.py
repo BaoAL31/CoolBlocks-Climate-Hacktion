@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import threading
+import shutil
 import tempfile
 import uuid
 from datetime import date as Date
@@ -197,8 +198,22 @@ def get_weather(day: str | None, hours: list[int]):
 # ------------------------------------------------------------------ SOLWEIG helpers
 
 
+# Several visitors can ask at once. SOLWEIG runs one at a time (it shares the GPU and writes temporary
+# files), and each run gets its own folder so runs never trip over each other's files.
+_SOLWEIG_LOCK = threading.Lock()
+_BASELINE_LOCK = threading.Lock()
+
+
 def _run(name, dsm, dem, cdsm, lc, weather, location):
-    out = WORK / name
+    with _SOLWEIG_LOCK:
+        out = WORK / f"{name}_{uuid.uuid4().hex[:8]}"
+        try:
+            return _run_in(out, dsm, dem, cdsm, lc, weather, location)
+        finally:
+            shutil.rmtree(out, ignore_errors=True)
+
+
+def _run_in(out, dsm, dem, cdsm, lc, weather, location):
     # SOLWEIG modifies input arrays in place (e.g. cdsm), so always hand it copies
     dsm, dem, cdsm, lc = (None if a is None else a.copy() for a in (dsm, dem, cdsm, lc))
     surface = solweig.SurfaceData.prepare(
@@ -340,7 +355,7 @@ def _warm_up():
     def run():
         for day in ("2025-12-19", None):
             try:
-                _baseline(day, tuple(DEFAULT_HOURS))
+                _baseline_once(day)
             except Exception as e:  # never stop the server over a warm-up
                 print(f"coolblocks: warm-up for {day or 'today'} failed ({e})")
 
@@ -438,7 +453,13 @@ def baseline(date: str | None = None):
     """Heat + shadow images for the whole area, before any edits. First call takes a while; then cached."""
     if date:
         Date.fromisoformat(date)
-    return _baseline(date, tuple(DEFAULT_HOURS))
+    return _baseline_once(date)
+
+
+def _baseline_once(day: str | None):
+    """Two people opening the app together wait for one heat map instead of both computing it."""
+    with _BASELINE_LOCK:
+        return _baseline(day, tuple(DEFAULT_HOURS))
 
 
 @app.post("/api/simulate")
