@@ -14,8 +14,8 @@ function startMcpSync({ snapshot, apply, request, status }) {
   if (connection) {
     connection.className = 'agent-connection';
     connection.innerHTML = `
-      <button type="button" popovertarget="agent-pairing" aria-label="Connect an agent" title="Connect an agent">
-        <i class="ph ph-plugs-connected" aria-hidden="true"></i><span>Connect Agent</span>
+      <button type="button" class="icon-btn" popovertarget="agent-pairing" aria-label="Connect an agent" title="Connect an agent">
+        <i class="ph ph-plugs-connected" aria-hidden="true"></i>
       </button>
       <section id="agent-pairing" class="agent-pairing" popover aria-labelledby="agent-pairing-title">
         <div class="agent-pairing-heading">
