@@ -1,4 +1,4 @@
-<p align="center"> <img src="assets/fulllogo.png" alt="CoolBlocks" width="480"> </p>
+<p align="center"> <picture> <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/fulllogodark.png"> <img src="docs/screenshots/fulllogo.png" alt="CoolBlocks" width="480"> </picture> </p>
 
 # CoolBlocks
 
