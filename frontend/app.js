@@ -10,7 +10,10 @@ const state = {
   result: null,        // last /simulate response
   edits: [],           // edits sent to the backend
   tool: 'pan',
-  draft: [],           // polygon corners being drawn
+  draft: null,         // box being dragged: {start: LngLat, ring: [[lng,lat]...]}
+  trees: [],           // existing trees from the backend: [{lng, lat, height, radius}]
+  buildings: null,     // existing building footprints (GeoJSON, each with properties.idx)
+  probe: null,         // last spot checked with the Temperature tool: {map, lngLat}
   hour: 15,
   date: '',            // '' = live
   heatMode: 'heat',
@@ -105,27 +108,31 @@ function setImage(map, id, url, bounds) {
 }
 
 function addVectorLayers(map, heat) {
-  map.addSource('buildings', { type: 'geojson', data: `${API}/api/buildings` });
-  map.addSource('trees', { type: 'geojson', data: `${API}/api/trees` });
+  map.addSource('buildings', { type: 'geojson', data: state.buildings || EMPTY });
+  map.addSource('trees', { type: 'geojson', data: EMPTY });
+  map.addSource('newtrees', { type: 'geojson', data: EMPTY });
+  map.addSource('removedtrees', { type: 'geojson', data: EMPTY });
   map.addSource('edits', { type: 'geojson', data: EMPTY });
   map.addSource('draft', { type: 'geojson', data: EMPTY });
 
   map.addLayer({ id: 'edit-surface', type: 'fill', source: 'edits', filter: ['==', ['get', 'kind'], 'surface'],
     paint: { 'fill-color': ['get', 'color'], 'fill-opacity': heat ? 0.25 : 0.7 } });
-  map.addLayer({ id: 'edit-outline', type: 'line', source: 'edits', filter: ['!=', ['get', 'kind'], 'tree'],
+  map.addLayer({ id: 'edit-outline', type: 'line', source: 'edits',
     paint: { 'line-color': ['get', 'color'], 'line-width': 2, 'line-dasharray': [2, 1] } });
+  map.addLayer({ id: 'removed-trees', type: 'fill', source: 'removedtrees',
+    paint: { 'fill-color': '#ff3b30', 'fill-opacity': 0.35, 'fill-outline-color': '#ff3b30' } });
   map.addLayer({ id: 'buildings-3d', type: 'fill-extrusion', source: 'buildings',
     paint: { 'fill-extrusion-color': heat ? '#9aa3a0' : '#e8dfd0', 'fill-extrusion-height': ['get', 'height'],
              'fill-extrusion-opacity': heat ? 0.75 : 0.9 } });
-  map.addLayer({ id: 'trees-3d', type: 'fill-extrusion', source: 'trees',
-    paint: { 'fill-extrusion-color': '#3f8f4a', 'fill-extrusion-height': ['get', 'height'],
-             'fill-extrusion-base': ['*', 0.35, ['get', 'height']], 'fill-extrusion-opacity': heat ? 0.35 : 0.85 } });
+  const treePaint = (opacity) => ({ 'fill-extrusion-color': ['get', 'color'], 'fill-extrusion-height': ['get', 'height'],
+    'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-opacity': opacity });
+  map.addLayer({ id: 'trees-3d', type: 'fill-extrusion', source: 'trees', paint: treePaint(heat ? 0.4 : 0.9) });
+  map.addLayer({ id: 'newtrees-3d', type: 'fill-extrusion', source: 'newtrees', paint: treePaint(heat ? 0.6 : 0.95) });
   map.addLayer({ id: 'edit-3d', type: 'fill-extrusion', source: 'edits', filter: ['>', ['get', 'height'], 0],
     paint: { 'fill-extrusion-color': ['get', 'color'], 'fill-extrusion-height': ['get', 'height'],
              'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-opacity': heat ? 0.5 : 0.9 } });
-  map.addLayer({ id: 'draft-line', type: 'line', source: 'draft', paint: { 'line-color': '#ff3b30', 'line-width': 2 } });
-  map.addLayer({ id: 'draft-pts', type: 'circle', source: 'draft', filter: ['==', ['geometry-type'], 'Point'],
-    paint: { 'circle-radius': 4, 'circle-color': '#ff3b30' } });
+  map.addLayer({ id: 'draft-fill', type: 'fill', source: 'draft', paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.25 } });
+  map.addLayer({ id: 'draft-line', type: 'line', source: 'draft', paint: { 'line-color': ['get', 'color'], 'line-width': 2 } });
 }
 
 // ---------------------------------------------------------------- edits -> display
@@ -142,19 +149,79 @@ function circle(lng, lat, r, n = 20) {  // r in metres
   return { type: 'Polygon', coordinates: [ring] };
 }
 
-function editFeatures() {
+// A tree drawn as a trunk plus a round crown, stacked from flat discs (MapLibre can only extrude flat shapes).
+const CROWN_TIERS = 6;
+function treeModel(lng, lat, h, r, greens) {
+  const feats = [];
+  const crownBase = 0.3 * h, half = (h - crownBase) / 2, mid = crownBase + half, step = (h - crownBase) / CROWN_TIERS;
+  feats.push({ type: 'Feature', geometry: circle(lng, lat, Math.max(0.25, r * 0.08), 8),
+    properties: { color: '#6b4a2b', base: 0, height: crownBase + step } });
+  for (let i = 0; i < CROWN_TIERS; i++) {
+    const z0 = crownBase + i * step, zMid = z0 + step / 2;
+    const ri = r * Math.sqrt(Math.max(0.05, 1 - ((zMid - mid) / half) ** 2));
+    feats.push({ type: 'Feature', geometry: circle(lng, lat, ri, 14),
+      properties: { color: greens[i % greens.length], base: z0, height: z0 + step } });
+  }
+  return feats;
+}
+const OLD_GREENS = ['#3e7a35', '#4a8a3e'];
+const NEW_GREENS = ['#2fa84f', '#3cbf5c'];
+
+function inside(pt, poly) {  // point-in-polygon (outer ring only)
+  const ring = poly.coordinates[0];
+  let hit = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) hit = !hit;
+  }
+  return hit;
+}
+
+function refreshTrees() {
+  // existing trees disappear when any remove box covers them; a placed tree only if a LATER remove box covers it
+  const removes = state.edits.map((e, i) => (e.type === 'remove_trees' ? [i, e.geometry] : null)).filter(Boolean);
+  const gone = (t) => removes.some(([, g]) => inside([t.lng, t.lat], g));
+  const oldTrees = state.trees.filter((t) => !gone(t)).flatMap((t) => treeModel(t.lng, t.lat, t.height, t.radius, OLD_GREENS));
+  const removed = state.trees.filter(gone).map((t) => ({ type: 'Feature', geometry: circle(t.lng, t.lat, t.radius, 14), properties: {} }));
   const sizes = state.area.tree_sizes;
+  const newTrees = state.edits.flatMap((e, i) => {
+    if (e.type !== 'add_tree') return [];
+    const p = e.geometry.coordinates;
+    if (removes.some(([j, g]) => j > i && inside(p, g))) return [];
+    const [h, r] = sizes[e.size];
+    return treeModel(p[0], p[1], h, r, NEW_GREENS);
+  });
+  maps.forEach((m) => {
+    m.getSource('trees')?.setData({ type: 'FeatureCollection', features: oldTrees });
+    m.getSource('newtrees')?.setData({ type: 'FeatureCollection', features: newTrees });
+    m.getSource('removedtrees')?.setData({ type: 'FeatureCollection', features: removed });
+  });
+}
+
+function insideGeom(pt, g) {
+  if (g.type === 'Polygon') return inside(pt, g);
+  if (g.type === 'MultiPolygon') return g.coordinates.some((c) => inside(pt, { coordinates: c }));
+  return false;
+}
+
+// buildings knocked down with the Demolish tool: existing ones by idx, new ones by their edit index
+function demolished() {
+  const idx = new Set(), edits = new Set();
+  state.edits.forEach((e) => {
+    if (e.demolish?.idx != null) idx.add(e.demolish.idx);
+    if (e.demolish?.edit != null) edits.add(e.demolish.edit);
+  });
+  return { idx, edits };
+}
+
+function editFeatures() {
+  const gone = demolished().edits;
   return {
     type: 'FeatureCollection',
-    features: state.edits.map((e) => {
-      if (e.type === 'add_tree') {
-        const [h, r] = sizes[e.size];
-        const [lng, lat] = e.geometry.coordinates;
-        return { type: 'Feature', geometry: circle(lng, lat, r), properties: { kind: 'tree', color: '#2f9e44', height: h, base: h * 0.35 } };
-      }
+    features: state.edits.map((e, i) => [e, i]).filter(([e, i]) => e.type !== 'add_tree' && !gone.has(i)).map(([e, i]) => {
       if (e.type === 'surface') return { type: 'Feature', geometry: e.geometry, properties: { kind: 'surface', color: SURFACE_COLORS[e.surface], height: 0, base: 0 } };
       if (e.type === 'building') return { type: 'Feature', geometry: e.geometry,
-        properties: { kind: 'building', color: e.height > 0 ? '#c9a227' : '#ff3b30', height: e.height, base: 0 } };
+        properties: { kind: 'building', editIndex: i, color: e.height > 0 ? '#c9a227' : '#ff3b30', height: e.height, base: 0 } };
       return { type: 'Feature', geometry: e.geometry, properties: { kind: 'remove', color: '#ff3b30', height: 0, base: 0 } };
     }),
   };
@@ -162,14 +229,24 @@ function editFeatures() {
 
 function refreshEdits() {
   const fc = editFeatures();
-  maps.forEach((m) => m.getSource('edits')?.setData(fc));
+  const gone = [...demolished().idx];
+  maps.forEach((m) => {
+    m.getSource('edits')?.setData(fc);
+    if (m.getLayer('buildings-3d')) m.setFilter('buildings-3d', ['!', ['in', ['get', 'idx'], ['literal', gone]]]);
+  });
+  refreshTrees();
   $('simulate').textContent = state.edits.length ? `Simulate (${state.edits.length})` : 'Simulate';
 }
 
+function toolColor() {
+  if (state.tool === 'surface') return SURFACE_COLORS[$('surfaceType').value];
+  if (state.tool === 'building') return Number($('buildingHeight').value) > 0 ? '#c9a227' : '#ff3b30';
+  return '#ff3b30';
+}
+
 function refreshDraft() {
-  const pts = state.draft;
-  const feats = pts.map((p) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: p } }));
-  if (pts.length > 1) feats.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: pts } });
+  const ring = state.draft?.ring;
+  const feats = ring ? [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] }, properties: { color: toolColor() } }] : [];
   maps.forEach((m) => m.getSource('draft')?.setData({ type: 'FeatureCollection', features: feats }));
 }
 
@@ -184,48 +261,150 @@ function addEdit(e) {
 
 document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
 
+const BOX_TOOLS = ['remove_trees', 'surface', 'building'];
+const HINTS = {
+  probe: 'Click any spot on either map to see how hot it feels there.',
+  demolish: 'Click a building (existing or one you added) to knock it down. Undo brings it back.',
+  tree: 'Click (or tap) on either map to plant a tree.',
+  remove_trees: 'Drag a box over trees to remove them. Esc cancels.',
+  surface: 'Drag a box over the ground to change its surface. Esc cancels.',
+  building: 'Drag a box to add a building, or over one to change its height. Esc cancels.',
+};
+
 function setTool(tool) {
+  if (tool !== 'probe') closeProbe();
   state.tool = tool;
-  state.draft = [];
+  state.draft = null;
   refreshDraft();
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === tool));
-  const drawing = ['remove_trees', 'surface', 'building'].includes(tool);
-  $('drawHint').classList.toggle('hidden', !drawing);
+  $('drawHint').textContent = HINTS[tool] || '';
+  $('drawHint').classList.toggle('hidden', !HINTS[tool]);
+  const box = BOX_TOOLS.includes(tool);
   maps.forEach((m) => {
-    m.getCanvas().style.cursor = tool === 'pan' ? '' : 'crosshair';
-    if (drawing) m.doubleClickZoom.disable(); else m.doubleClickZoom.enable();
+    m.getCanvas().style.cursor = tool === 'pan' ? '' : tool === 'demolish' ? 'pointer' : 'crosshair';
+    if (box) { m.dragPan.disable(); m.touchZoomRotate.disable(); } else { m.dragPan.enable(); m.touchZoomRotate.enable(); }
   });
 }
 
-function finishPolygon() {
-  if (state.draft.length < 3) return;
-  const ring = [...state.draft, state.draft[0]];
-  const geometry = { type: 'Polygon', coordinates: [ring] };
+// A box on the ground, lined up with the screen (so it looks like a rectangle at any map rotation).
+function groundBox(a, b, bearing) {
+  const mLat = 111320, mLng = 111320 * Math.cos(a.lat * Math.PI / 180);
+  const dx = (b.lng - a.lng) * mLng, dy = (b.lat - a.lat) * mLat;  // metres east, north
+  const t = bearing * Math.PI / 180;
+  const right = [Math.cos(t), -Math.sin(t)], up = [Math.sin(t), Math.cos(t)];
+  const du = dx * right[0] + dy * right[1], dv = dx * up[0] + dy * up[1];
+  const pt = (u, v) => [a.lng + (u * right[0] + v * up[0]) / mLng, a.lat + (u * right[1] + v * up[1]) / mLat];
+  return { ring: [pt(0, 0), pt(du, 0), pt(du, dv), pt(0, dv), pt(0, 0)], size: Math.min(Math.abs(du), Math.abs(dv)) };
+}
+
+function finishBox() {
+  const d = state.draft;
+  state.draft = null;
+  refreshDraft();
+  if (!d || d.size < 1) return;  // just a click, not a drag
+  const geometry = { type: 'Polygon', coordinates: [d.ring] };
   if (state.tool === 'remove_trees') addEdit({ type: 'remove_trees', geometry });
   if (state.tool === 'surface') addEdit({ type: 'surface', surface: $('surfaceType').value, geometry });
   if (state.tool === 'building') addEdit({ type: 'building', height: Math.max(0, Number($('buildingHeight').value) || 0), geometry });
-  state.draft = [];
-  refreshDraft();
 }
 
 maps.forEach((m) => {
   m.on('click', (ev) => {
-    const p = [ev.lngLat.lng, ev.lngLat.lat];
-    if (state.tool === 'tree') addEdit({ type: 'add_tree', size: $('treeSize').value, geometry: { type: 'Point', coordinates: p } });
-    else if (state.tool !== 'pan') { state.draft.push(p); refreshDraft(); }
+    if (state.tool === 'tree') addEdit({ type: 'add_tree', size: $('treeSize').value, geometry: { type: 'Point', coordinates: [ev.lngLat.lng, ev.lngLat.lat] } });
+    if (state.tool === 'probe') { state.probe = { map: m, lngLat: ev.lngLat }; probe(); }
+    if (state.tool === 'demolish') demolish(m, ev);
   });
-  m.on('dblclick', (ev) => {
-    if (['remove_trees', 'surface', 'building'].includes(state.tool)) {
-      ev.preventDefault();
-      state.draft.pop();  // the double-click also fired a click
-      finishPolygon();
-    }
-  });
+  const start = (ev) => {
+    if (!BOX_TOOLS.includes(state.tool)) return;
+    if (ev.originalEvent.touches && ev.originalEvent.touches.length > 1) return;
+    ev.preventDefault();
+    state.draft = { start: ev.lngLat, ring: null, size: 0 };
+  };
+  const move = (ev) => {
+    if (!state.draft) return;
+    Object.assign(state.draft, groundBox(state.draft.start, ev.lngLat, m.getBearing()));
+    refreshDraft();
+  };
+  m.on('mousedown', start);
+  m.on('touchstart', start);
+  m.on('mousemove', move);
+  m.on('touchmove', move);
+  m.on('touchend', finishBox);
 });
+document.addEventListener('mouseup', finishBox);
+
+// ---------------------------------------------------------------- demolish
+
+function pickBuilding(m, ev) {
+  const { idx: goneIdx, edits: goneEdits } = demolished();
+  // 1) the building drawn under the cursor (works when clicking a wall or roof in 3D)
+  const layers = ['edit-3d', 'buildings-3d'].filter((id) => m.getLayer(id) && m.getLayoutProperty(id, 'visibility') !== 'none');
+  for (const f of m.queryRenderedFeatures(ev.point, { layers })) {
+    if (f.layer.id === 'edit-3d' && f.properties.editIndex != null) return { edit: f.properties.editIndex };
+    if (f.layer.id === 'buildings-3d' && f.properties.idx != null) return { idx: f.properties.idx };
+  }
+  // 2) otherwise the footprint under the clicked ground point (e.g. 3D blocks hidden on the photo view)
+  const p = [ev.lngLat.lng, ev.lngLat.lat];
+  for (let i = state.edits.length - 1; i >= 0; i--) {
+    const e = state.edits[i];
+    if (e.type === 'building' && e.height > 0 && !e.demolish && !goneEdits.has(i) && insideGeom(p, e.geometry)) return { edit: i };
+  }
+  const b = (state.buildings?.features || []).find((f) => !goneIdx.has(f.properties.idx) && insideGeom(p, f.geometry));
+  return b ? { idx: b.properties.idx } : null;
+}
+
+function demolish(m, ev) {
+  const pick = pickBuilding(m, ev);
+  if (!pick) { $('status').textContent = 'No building there. Click on a building to demolish it.'; return; }
+  const geometry = pick.edit != null ? state.edits[pick.edit].geometry
+    : state.buildings.features.find((f) => f.properties.idx === pick.idx).geometry;
+  addEdit({ type: 'building', height: 0, geometry, demolish: pick });
+}
+
+// ---------------------------------------------------------------- temperature at a spot
+
+let probePopup = null, probeRequest = 0;
+function closeProbe() {
+  state.probe = null;
+  probePopup?.remove();
+  probePopup = null;
+}
+
+async function probe() {
+  const p = state.probe;
+  if (!p) return;
+  const req = ++probeRequest;
+  probePopup?.remove();
+  probePopup = new maplibregl.Popup({ closeButton: true, maxWidth: '260px' }).setLngLat(p.lngLat)
+    .setHTML(`<div class="probe">Checking ${fmtHour(state.hour)}…</div>`).addTo(p.map);
+  probePopup.on('close', () => { if (req === probeRequest) state.probe = null; });
+  const q = new URLSearchParams({ lon: p.lngLat.lng, lat: p.lngLat.lat, hour: state.hour });
+  if (state.date) q.set('date', state.date);
+  if (state.result?.sim_id) q.set('sim_id', state.result.sim_id);
+  let html;
+  try {
+    const r = await api(`point?${q}`);
+    const shade = (s) => (s ? 'in shade' : 'in sun');
+    const t = (v) => (v == null ? 'n/a' : `${v.toFixed(1)} °C`);
+    if (r.after != null && r.before != null && Math.abs(r.after - r.before) >= 0.1) {
+      const d = r.after - r.before;
+      html = `Feels like <b>${t(r.after)}</b> after your changes`
+        + `<br><span class="${d < 0 ? 'cool' : 'hot'}">${d < 0 ? '' : '+'}${d.toFixed(1)} °C</span> (was ${t(r.before)}, ${r.surface_before === 'roof' && r.surface !== 'roof' ? 'on a rooftop' : shade(r.shade_before)})`
+        + `<br><small>${fmtHour(r.hour)} · air ${t(r.air_temp)} · ${r.surface} · ${shade(r.shade_after)}</small>`;
+    } else {
+      html = `Feels like <b>${t(r.before)}</b>`
+        + `<br><small>${fmtHour(r.hour)} · air ${t(r.air_temp)} · ${r.surface} · ${shade(r.shade_before)}</small>`
+        + (state.edits.length && !state.result ? '<br><small>Press Simulate to see the effect of your changes here.</small>' : '');
+    }
+  } catch (err) {
+    html = /409/.test(err.message) ? 'The heat map is still loading. Try again in a moment.'
+      : /404/.test(err.message) ? 'That spot is outside the study area.' : `Couldn't check this spot (${err.message}).`;
+  }
+  if (req === probeRequest && probePopup) probePopup.setHTML(`<div class="probe">${html}</div>`);
+}  // also catches a drag released outside the map
 
 document.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Enter') finishPolygon();
-  if (ev.key === 'Escape') { state.draft = []; refreshDraft(); }
+  if (ev.key === 'Escape') { state.draft = null; refreshDraft(); }
 });
 $('undo').onclick = () => { state.edits.pop(); state.result = null; refreshEdits(); render(); };
 $('clear').onclick = () => { state.edits = []; state.result = null; refreshEdits(); render(); };
@@ -234,6 +413,7 @@ $('clear').onclick = () => { state.edits = []; state.result = null; refreshEdits
 
 const fmtHour = (h) => (h === 12 ? '12 pm' : h > 12 ? `${h - 12} pm` : `${h} am`);
 $('hour').oninput = (ev) => { state.hour = Number(ev.target.value); render(); };
+$('hour').onchange = () => probe();  // update the temperature popup once the slider is let go
 $('date').onchange = (ev) => { state.date = ev.target.value; state.result = null; loadBaseline(); };
 $('live').onclick = () => { $('date').value = ''; state.date = ''; state.result = null; loadBaseline(); };
 document.querySelectorAll('input[name=heatMode]').forEach((r) => r.addEventListener('change', (ev) => { state.heatMode = ev.target.value; render(); }));
@@ -257,10 +437,10 @@ function render() {
   const showChange = state.heatMode === 'change';
 
   setImage(mapHeat, 'heat', showChange ? null : base?.utci_png);
-  setImage(mapReal, 'shadow', base?.shadow_png);
+  setImage(mapReal, 'shadow', res?.shadow_full_png || base?.shadow_png);
   const rb = state.result?.bounds;
   setImage(mapHeat, 'patch', res ? (showChange ? res.change_png : res.utci_png) : null, rb);
-  setImage(mapReal, 'patch-shadow', res?.shadow_png, rb);
+  setImage(mapReal, 'patch-shadow', res?.shadow_full_png ? null : res?.shadow_png, rb);
   setImage(mapHeat, 'patch-shadow', null, rb);
 
   const card = $('card');
@@ -283,16 +463,35 @@ async function api(path, opts) {
   return r.json();
 }
 
+function setLoading(msg) {
+  document.querySelectorAll('.loading').forEach((el) => {
+    el.classList.toggle('hidden', !msg);
+    el.querySelector('span').textContent = msg || '';
+  });
+}
+
+const fmtDate = (d) => new Date(`${d}T00:00`).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+
+let baselineRequest = 0;
 async function loadBaseline() {
-  $('status').textContent = 'Calculating heat for the whole area (first time takes a minute)…';
+  const req = ++baselineRequest;  // ignore answers to older requests if the date changed meanwhile
+  const what = state.date ? `weather and heat for ${fmtDate(state.date)}` : "today's live weather and heat";
+  setLoading(`Loading ${what}…`);
+  render();  // drop results from the previous day straight away
+  $('status').textContent = 'Calculating heat for the whole area (a new day takes about a minute)…';
   try {
-    state.baseline = await api(`baseline${state.date ? `?date=${state.date}` : ''}`);
+    const baseline = await api(`baseline${state.date ? `?date=${state.date}` : ''}`);
+    if (req !== baselineRequest) return;
+    state.baseline = baseline;
     $('status').textContent = `Weather: ${state.baseline.weather_source}${state.date ? ` · ${state.date}` : ' · live'} · area: ${state.area.source}`
       + (state.area.source === 'synthetic demo' ? ' ⚠ made-up buildings: run scripts/build_area.py for real ones' : '');
   } catch (err) {
+    if (req !== baselineRequest) return;
     $('status').textContent = `Couldn't load heat map: ${err.message}`;
   }
+  setLoading(null);
   render();
+  probe();
 }
 
 $('simulate').onclick = async () => {
@@ -301,15 +500,18 @@ $('simulate').onclick = async () => {
   btn.disabled = true;
   btn.textContent = 'Simulating…';
   $('status').textContent = 'Running the shade and heat model for your changes…';
+  setLoading('Simulating your changes…');
   try {
     state.result = await api('simulate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ edits: state.edits, date: state.date || null, hours: state.area.hours }),
+      body: JSON.stringify({ edits: state.edits.map(({ demolish: _, ...e }) => e), date: state.date || null, hours: state.area.hours }),
     });
     $('status').textContent = `Done · weather: ${state.result.weather_source}`;
+    probe();
   } catch (err) {
     $('status').textContent = `Simulation failed: ${err.message}`;
   }
+  setLoading(null);
   btn.disabled = false;
   refreshEdits();
   render();
@@ -319,8 +521,13 @@ $('simulate').onclick = async () => {
 
 (async function init() {
   try {
+    setLoading('Loading the area…');
     state.area = await api('area');
+    const [trees, buildings] = await Promise.all([api('trees'), api('buildings')]);
+    state.buildings = buildings;
+    state.trees = trees.features.map((f) => ({ lng: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], ...f.properties }));
   } catch (err) {
+    setLoading(null);
     $('card').textContent = `Can't reach the backend (${err.message}). Is "uvicorn server:app" running?`;
     return;
   }
@@ -335,6 +542,7 @@ $('simulate').onclick = async () => {
   addVectorLayers(mapReal, false);
   addVectorLayers(mapHeat, true);
   applyRealToggles();
+  refreshTrees();
   mapReal.fitBounds([[w, s], [e, n]], { padding: 20, pitch: 55, bearing: -20, duration: 0 });
   $('hour').min = Math.min(...state.area.hours);
   $('hour').max = Math.max(...state.area.hours);

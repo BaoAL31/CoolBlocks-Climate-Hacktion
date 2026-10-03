@@ -37,9 +37,32 @@ main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; backgro
 .legend .bar { width: 180px; height: 10px; border-radius: 3px; margin: 4px 0 2px; }
 .legend .ticks { display: flex; justify-content: space-between; color: var(--muted); }
 
-.hint { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 10;
-  background: var(--ink); color: var(--bg); padding: 6px 12px; border-radius: 6px; font-size: 13px; }
+.hint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 10; pointer-events: none;
+  max-width: calc(100% - 24px); text-align: center; background: rgba(20, 28, 24, .85); color: #fff;
+  padding: 5px 12px; border-radius: 6px; font-size: 13px; }
+main { position: relative; }
+
+.loading { position: absolute; inset: 0; top: 34px; z-index: 5; display: flex; flex-direction: column; gap: 10px;
+  align-items: center; justify-content: center; background: rgba(15, 22, 18, .45); color: #fff;
+  font-weight: 600; text-shadow: 0 1px 3px rgba(0, 0, 0, .6); }
+.loading.hidden { display: none; }
+.maplibregl-popup-content { padding: 8px 26px 8px 10px; }
+.probe { color: #1d2a24; font-size: 13px; line-height: 1.45; }
+.probe b { font-size: 15px; }
+.probe small { color: #5b6862; }
+.probe .cool { color: #1f6fb2; font-weight: 700; }
+.probe .hot { color: #b4531f; font-weight: 700; }
+.spinner { width: 42px; height: 42px; border-radius: 50%; border: 4px solid rgba(255, 255, 255, .35);
+  border-top-color: #fff; animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
 .hidden { display: none; }
+.maplibregl-popup-content { padding: 8px 26px 8px 10px; }
+.probe { color: #1d2a24; font-size: 13px; line-height: 1.45; }
+.probe b { font-size: 15px; }
+.probe small { color: #5b6862; }
+.probe .cool { color: #1f6fb2; font-weight: 700; }
+.probe .hot { color: #b4531f; font-weight: 700; }
 
 footer { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; padding: 8px 12px;
   background: var(--panel); border-top: 1px solid var(--line); }
@@ -56,5 +79,4 @@ footer { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-i
   footer { grid-template-columns: 1fr; }
   .actions { margin-left: 0; }
   #hour { width: 150px; }
-  .hint { top: auto; bottom: 120px; }
 }

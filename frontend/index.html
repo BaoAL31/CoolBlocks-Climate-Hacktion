@@ -12,14 +12,15 @@
     <div class="brand">CoolBlocks <span>How much cooler could this street be?</span></div>
     <div class="tools" id="tools">
       <button data-tool="pan" class="active" title="Move around">✋ Pan</button>
+      <button data-tool="probe" title="Click a spot to see how hot it feels there">🌡️ Temperature</button>
       <button data-tool="tree" title="Click to plant a tree">🌳 Tree</button>
       <select id="treeSize" title="Tree size">
         <option value="small">Small (6 m)</option>
         <option value="medium" selected>Medium (10 m)</option>
         <option value="large">Large (15 m)</option>
       </select>
-      <button data-tool="remove_trees" title="Draw an area to remove trees">🪓 Remove trees</button>
-      <button data-tool="surface" title="Draw an area to change the ground surface">🟩 Surface</button>
+      <button data-tool="remove_trees" title="Drag a box over trees to remove them">🪓 Remove trees</button>
+      <button data-tool="surface" title="Drag a box to change the ground surface">🟩 Surface</button>
       <select id="surfaceType" title="New surface">
         <option value="grass">Grass</option>
         <option value="cool_asphalt">Cool (reflective) asphalt</option>
@@ -28,8 +29,9 @@
         <option value="soil">Bare soil</option>
         <option value="water">Water</option>
       </select>
-      <button data-tool="building" title="Draw a footprint to add, raise or demolish a building">🏢 Building</button>
+      <button data-tool="building" title="Drag a box to add a building or change building heights">🏢 Building</button>
       <label class="inline">height <input id="buildingHeight" type="number" min="0" max="250" value="20" step="1"> m</label>
+      <button data-tool="demolish" title="Click a building to knock it down">💥 Demolish</button>
     </div>
     <div class="actions">
       <button id="undo" title="Undo last edit">↶ Undo</button>
@@ -38,9 +40,8 @@
     </div>
   </header>
 
-  <div id="drawHint" class="hint hidden">Click to add corners. Double-click (or Enter) to finish, Esc to cancel.</div>
-
   <main>
+    <div id="drawHint" class="hint hidden"></div>
     <section class="pane">
       <div class="pane-title">Real-world view <small>aerial photo + shade</small>
         <span class="toggle">
@@ -49,6 +50,7 @@
         </span>
       </div>
       <div id="mapReal" class="map"></div>
+      <div class="loading hidden"><div class="spinner"></div><span></span></div>
     </section>
     <section class="pane">
       <div class="pane-title">Heat view <small id="heatTitle">"feels like" temperature (UTCI)</small>
@@ -58,6 +60,7 @@
         </span>
       </div>
       <div id="mapHeat" class="map"></div>
+      <div class="loading hidden"><div class="spinner"></div><span></span></div>
       <div class="legend" id="legend"></div>
     </section>
   </main>
