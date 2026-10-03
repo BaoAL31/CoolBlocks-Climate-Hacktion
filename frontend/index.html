@@ -5,75 +5,108 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CoolBlocks</title>
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.2/src/regular/style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5.3.0/index.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header>
-    <div class="brand">CoolBlocks <span>How much cooler could this street be?</span></div>
-    <div class="tools" id="tools">
-      <button data-tool="pan" class="active" title="Move around">✋ Pan</button>
-      <button data-tool="probe" title="Click a spot to see how hot it feels there">🌡️ Temperature</button>
-      <button data-tool="tree" title="Click to plant a tree">🌳 Tree</button>
-      <select id="treeSize" title="Tree size">
-        <option value="small">Small (6 m)</option>
-        <option value="medium" selected>Medium (10 m)</option>
-        <option value="large">Large (15 m)</option>
-      </select>
-      <button data-tool="remove_trees" title="Drag a box over trees to remove them">🪓 Remove trees</button>
-      <button data-tool="surface" title="Drag a box to change the ground surface">🟩 Surface</button>
-      <select id="surfaceType" title="New surface">
-        <option value="grass">Grass</option>
-        <option value="cool_asphalt">Cool (reflective) asphalt</option>
-        <option value="asphalt">Dark asphalt</option>
-        <option value="paving">Paving</option>
-        <option value="soil">Bare soil</option>
-        <option value="water">Water</option>
-      </select>
-      <button data-tool="building" title="Drag a box to add a building or change building heights">🏢 Building</button>
-      <label class="inline">height <input id="buildingHeight" type="number" min="0" max="250" value="20" step="1"> m</label>
-      <button data-tool="demolish" title="Click a building to knock it down">💥 Demolish</button>
+    <div class="brand">
+      <span class="name">CoolBlocks</span>
+      <span class="tagline">How much cooler could this street be?</span>
     </div>
+
+    <div class="toolbar">
+      <div class="tools" id="tools" role="toolbar" aria-label="Tools">
+        <button data-tool="pan" class="active" title="Move and rotate the map"><i class="ph ph-hand"></i><span>Pan</span></button>
+        <button data-tool="probe" title="Click a spot to see how hot it feels there"><i class="ph ph-thermometer-simple"></i><span>Temperature</span></button>
+        <button data-tool="tree" title="Click to plant a tree"><i class="ph ph-tree"></i><span>Tree</span></button>
+        <button data-tool="remove_trees" title="Drag a box over trees to remove them"><i class="ph ph-axe"></i><span>Remove trees</span></button>
+        <button data-tool="surface" title="Drag a box to change the ground surface"><i class="ph ph-paint-roller"></i><span>Surface</span></button>
+        <button data-tool="building" title="Drag a box to add a building or change building heights"><i class="ph ph-buildings"></i><span>Building</span></button>
+        <button data-tool="demolish" title="Click a building to knock it down"><i class="ph ph-bulldozer"></i><span>Demolish</span></button>
+      </div>
+
+      <!-- only the options for the selected tool are shown -->
+      <div class="tool-options">
+        <label class="option" data-for="tree">Size
+          <select id="treeSize">
+            <option value="small">Small, 6 m</option>
+            <option value="medium" selected>Medium, 10 m</option>
+            <option value="large">Large, 15 m</option>
+          </select>
+        </label>
+        <label class="option" data-for="surface">New surface
+          <select id="surfaceType">
+            <option value="grass">Grass</option>
+            <option value="cool_asphalt">Cool (reflective) asphalt</option>
+            <option value="asphalt">Dark asphalt</option>
+            <option value="paving">Paving</option>
+            <option value="soil">Bare soil</option>
+            <option value="water">Water</option>
+          </select>
+        </label>
+        <label class="option" data-for="building">Height
+          <input id="buildingHeight" type="number" min="0" max="250" value="20" step="1"> m
+        </label>
+      </div>
+    </div>
+
     <div class="actions">
-      <button id="undo" title="Undo last edit">↶ Undo</button>
-      <button id="clear" title="Remove all edits">Clear</button>
-      <button id="simulate" class="primary">Simulate</button>
+      <button id="undo" class="icon-btn" title="Undo last change" aria-label="Undo"><i class="ph ph-arrow-counter-clockwise"></i></button>
+      <button id="clear" class="icon-btn" title="Remove all changes" aria-label="Clear all changes"><i class="ph ph-trash"></i></button>
+      <button id="simulate" class="primary"><i class="ph ph-play"></i><span>Simulate</span></button>
     </div>
   </header>
 
-  <main>
+  <nav class="view-tabs" aria-label="Map view">
+    <button data-view="real" class="active">Real world</button>
+    <button data-view="heat">How hot it feels</button>
+  </nav>
+
+  <main data-view="real">
     <div id="drawHint" class="hint hidden"></div>
-    <section class="pane">
-      <div class="pane-title">Real-world view <small>aerial photo + shade</small>
+    <section class="pane" data-pane="real">
+      <div class="pane-title">
+        <h2>Real world</h2>
+        <small>Aerial photo with shade at the chosen time</small>
         <span class="toggle">
-          <label title="Show existing buildings and trees as 3D blocks on top of the photo"><input type="checkbox" id="blocks"> 3D blocks</label>
-          <label title="Show the modelled shade for the selected hour"><input type="checkbox" id="shade" checked> Shade</label>
+          <label title="Show existing buildings and trees as 3D models on top of the photo"><input type="checkbox" id="blocks"> 3D models</label>
+          <label title="Show the modelled shade for the chosen time"><input type="checkbox" id="shade" checked> Shade</label>
         </span>
       </div>
       <div id="mapReal" class="map"></div>
-      <div class="loading hidden"><div class="spinner"></div><span></span></div>
+      <div class="loading hidden"><div class="bar"></div><span class="msg"></span></div>
     </section>
-    <section class="pane">
-      <div class="pane-title">Heat view <small id="heatTitle">"feels like" temperature (UTCI)</small>
-        <span class="toggle">
-          <label><input type="radio" name="heatMode" value="heat" checked> Heat</label>
-          <label><input type="radio" name="heatMode" value="change"> Change</label>
+    <section class="pane" data-pane="heat">
+      <div class="pane-title">
+        <h2>How hot it feels</h2>
+        <small id="heatTitle">"Feels like" temperature for people outside</small>
+        <span class="segmented" role="radiogroup" aria-label="Heat map mode">
+          <label><input type="radio" name="heatMode" value="heat" checked><span>Temperature</span></label>
+          <label><input type="radio" name="heatMode" value="change"><span>Change</span></label>
         </span>
       </div>
       <div id="mapHeat" class="map"></div>
-      <div class="loading hidden"><div class="spinner"></div><span></span></div>
+      <div class="loading hidden"><div class="bar"></div><span class="msg"></span></div>
       <div class="legend" id="legend"></div>
     </section>
   </main>
 
   <footer>
     <div class="time">
-      <label for="hour">Time</label>
-      <input id="hour" type="range" min="9" max="18" step="1" value="15">
-      <output id="hourLabel">3 pm</output>
-      <label class="inline">Day <input id="date" type="date"></label>
-      <button id="live" title="Use today's live weather">Live</button>
+      <div class="slider">
+        <label for="hour">Time</label>
+        <input id="hour" type="range" min="9" max="18" step="1" value="15">
+        <output id="hourLabel">3 pm</output>
+      </div>
+      <div class="day">
+        <label for="date">Day</label>
+        <input id="date" type="date">
+        <button id="live" title="Use today's live weather"><i class="ph ph-broadcast"></i><span>Live</span></button>
+      </div>
     </div>
-    <div class="card" id="card">Loading the area…</div>
+    <div class="result" id="card" aria-live="polite">Loading the area…</div>
     <div class="status" id="status"></div>
   </footer>
 

@@ -235,7 +235,7 @@ function refreshEdits() {
     if (m.getLayer('buildings-3d')) m.setFilter('buildings-3d', ['!', ['in', ['get', 'idx'], ['literal', gone]]]);
   });
   refreshTrees();
-  $('simulate').textContent = state.edits.length ? `Simulate (${state.edits.length})` : 'Simulate';
+  $('simulate').querySelector('span').textContent = state.edits.length ? `Simulate (${state.edits.length})` : 'Simulate';
 }
 
 function toolColor() {
@@ -277,6 +277,7 @@ function setTool(tool) {
   state.draft = null;
   refreshDraft();
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === tool));
+  document.querySelectorAll('.option').forEach((o) => o.classList.toggle('show', o.dataset.for === tool));
   $('drawHint').textContent = HINTS[tool] || '';
   $('drawHint').classList.toggle('hidden', !HINTS[tool]);
   const box = BOX_TOOLS.includes(tool);
@@ -424,8 +425,10 @@ function legend() {
   const [lo, hi] = state.area.utci_range;
   const c = state.area.change_range;
   $('legend').innerHTML = state.heatMode === 'heat'
-    ? `"Feels like" °C<div class="bar" style="background:linear-gradient(90deg,#000004,#57106e,#bc3754,#f98e09,#fcffa4)"></div><div class="ticks"><span>${lo}</span><span>${(lo + hi) / 2}</span><span>${hi}+</span></div>`
-    : `Change after edits, °C<div class="bar" style="background:linear-gradient(90deg,#053061,#4393c3,#f7f7f7,#d6604d,#67001f)"></div><div class="ticks"><span>−${c} cooler</span><span>0</span><span>+${c} hotter</span></div>`;
+    ? `<b>Feels like</b>, °C<div class="bar" style="background:linear-gradient(90deg,#000004,#57106e,#bc3754,#f98e09,#fcffa4)"></div><div class="ticks"><span>${lo}</span><span>${(lo + hi) / 2}</span><span>${hi}+</span></div>`
+    : `<b>Change</b> after your edits, °C<div class="bar" style="background:linear-gradient(90deg,#053061,#4393c3,#f7f7f7,#d6604d,#67001f)"></div><div class="ticks"><span>−${c} cooler</span><span>0</span><span>+${c} hotter</span></div>`;
+  $('heatTitle').textContent = state.heatMode === 'heat'
+    ? '"Feels like" temperature for people outside' : 'Blue is cooler, red is hotter, after your changes';
 }
 
 function render() {
@@ -446,12 +449,14 @@ function render() {
   const card = $('card');
   if (res) {
     const d = res.utci_change_mean, best = res.utci_change_min, worst = res.utci_change_max;
-    card.innerHTML = `At <b>${fmtHour(res.hour)}</b> (air ${res.air_temp.toFixed(0)} °C), near your changes it feels `
-      + `<b class="${d > 0 ? 'hot' : ''}">${Math.abs(d).toFixed(1)} °C ${d <= 0 ? 'cooler' : 'hotter'}</b> on average`
-      + ` (best spot ${best.toFixed(1)} °C${worst > 0.5 ? `, some spots <span class="hot">+${worst.toFixed(1)} °C</span>` : ''}).`;
+    const cooler = d <= 0;
+    card.innerHTML = `<div class="big ${cooler ? 'cool' : 'hot'}">${cooler ? '−' : '+'}${Math.abs(d).toFixed(1)} °C</div>`
+      + `<div class="lines"><strong>${cooler ? 'Cooler' : 'Hotter'} near your changes at ${fmtHour(res.hour)}</strong>`
+      + `<span>Best spot ${best.toFixed(1)} °C${worst > 0.5 ? `, some spots <b class="hot">+${worst.toFixed(1)} °C</b>` : ''}. Air ${res.air_temp.toFixed(0)} °C.</span></div>`;
   } else if (base) {
-    card.innerHTML = `At <b>${fmtHour(base.hour)}</b>: air ${base.air_temp.toFixed(0)} °C, streets feel like <b>${base.utci_ground_mean.toFixed(0)} °C</b> on average. `
-      + (state.edits.length ? 'Press <b>Simulate</b> to see the effect of your changes.' : 'Plant a tree or change a surface, then press Simulate.');
+    card.innerHTML = `<div class="big">${base.utci_ground_mean.toFixed(0)} °C</div>`
+      + `<div class="lines"><strong>How hot the streets feel at ${fmtHour(base.hour)}</strong>`
+      + `<span>Air ${base.air_temp.toFixed(0)} °C. ${state.edits.length ? 'Press Simulate to see what your changes do.' : 'Plant a tree or change a surface, then press Simulate.'}</span></div>`;
   }
 }
 
@@ -466,11 +471,20 @@ async function api(path, opts) {
 function setLoading(msg) {
   document.querySelectorAll('.loading').forEach((el) => {
     el.classList.toggle('hidden', !msg);
-    el.querySelector('span').textContent = msg || '';
+    el.querySelector('.msg').textContent = msg || '';
   });
 }
 
 const fmtDate = (d) => new Date(`${d}T00:00`).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+
+// plain-language line about where the weather and buildings come from
+function showStatus() {
+  const src = state.baseline?.weather_source;
+  const when = state.date ? fmtDate(state.date) : 'live';
+  const weather = src === 'fallback hot day' ? 'built-in hot day (no internet weather)' : `${when}, from Open-Meteo`;
+  $('status').innerHTML = `Weather: ${weather}`
+    + (state.area?.source === 'synthetic demo' ? '<br><span class="warn">Demo area with made-up buildings</span>' : '');
+}
 
 let baselineRequest = 0;
 async function loadBaseline() {
@@ -478,13 +492,13 @@ async function loadBaseline() {
   const what = state.date ? `weather and heat for ${fmtDate(state.date)}` : "today's live weather and heat";
   setLoading(`Loading ${what}…`);
   render();  // drop results from the previous day straight away
-  $('status').textContent = 'Calculating heat for the whole area (a new day takes about a minute)…';
+  $('live').classList.toggle('on', !state.date);
+  $('status').textContent = 'Working out the heat for the whole area. A new day takes about a minute.';
   try {
     const baseline = await api(`baseline${state.date ? `?date=${state.date}` : ''}`);
     if (req !== baselineRequest) return;
     state.baseline = baseline;
-    $('status').textContent = `Weather: ${state.baseline.weather_source}${state.date ? ` · ${state.date}` : ' · live'} · area: ${state.area.source}`
-      + (state.area.source === 'synthetic demo' ? ' ⚠ made-up buildings: run scripts/build_area.py for real ones' : '');
+    showStatus();
   } catch (err) {
     if (req !== baselineRequest) return;
     $('status').textContent = `Couldn't load heat map: ${err.message}`;
@@ -498,15 +512,14 @@ $('simulate').onclick = async () => {
   if (!state.edits.length) { $('status').textContent = 'Add a tree or change a surface first.'; return; }
   const btn = $('simulate');
   btn.disabled = true;
-  btn.textContent = 'Simulating…';
-  $('status').textContent = 'Running the shade and heat model for your changes…';
+  btn.querySelector('span').textContent = 'Simulating…';
   setLoading('Simulating your changes…');
   try {
     state.result = await api('simulate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ edits: state.edits.map(({ demolish: _, ...e }) => e), date: state.date || null, hours: state.area.hours }),
     });
-    $('status').textContent = `Done · weather: ${state.result.weather_source}`;
+    showStatus();
     probe();
   } catch (err) {
     $('status').textContent = `Simulation failed: ${err.message}`;
@@ -516,6 +529,14 @@ $('simulate').onclick = async () => {
   refreshEdits();
   render();
 };
+
+// ---------------------------------------------------------------- phone: one map at a time
+
+document.querySelectorAll('[data-view]').forEach((b) => b.tagName === 'BUTTON' && b.addEventListener('click', () => {
+  document.querySelector('main').dataset.view = b.dataset.view;
+  document.querySelectorAll('.view-tabs button').forEach((x) => x.classList.toggle('active', x === b));
+  maps.forEach((m) => m.resize());
+}));
 
 // ---------------------------------------------------------------- start
 
@@ -528,7 +549,7 @@ $('simulate').onclick = async () => {
     state.trees = trees.features.map((f) => ({ lng: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], ...f.properties }));
   } catch (err) {
     setLoading(null);
-    $('card').textContent = `Can't reach the backend (${err.message}). Is "uvicorn server:app" running?`;
+    $('card').textContent = `Can't reach the server (${err.message}). Is "uvicorn server:app" running?`;
     return;
   }
   const [[w, s], [e, n]] = state.area.bounds;
