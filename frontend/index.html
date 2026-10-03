@@ -52,7 +52,10 @@
       </div>
     </div>
 
+    <div class="changes" id="changes" aria-label="Your changes"></div>
+
     <div class="actions">
+      <button id="example" title="Plant 10 street trees on a hot day (19 Dec 2025) and simulate"><i class="ph ph-sparkle"></i><span>Try an example</span></button>
       <button id="undo" class="icon-btn" title="Undo last change" aria-label="Undo"><i class="ph ph-arrow-counter-clockwise"></i></button>
       <button id="clear" class="icon-btn" title="Remove all changes" aria-label="Clear all changes"><i class="ph ph-trash"></i></button>
       <button id="simulate" class="primary"><i class="ph ph-play"></i><span>Simulate</span></button>
@@ -109,6 +112,22 @@
     <div class="result" id="card" aria-live="polite">Loading the area…</div>
     <div class="status" id="status"></div>
   </footer>
+
+  <div class="welcome hidden" id="welcome" role="dialog" aria-labelledby="welcomeTitle">
+    <div class="welcome-card">
+      <h1 id="welcomeTitle">How much cooler could this street be?</h1>
+      <p>CoolBlocks shows how hot it feels to stand outside around the University of Sydney, and how trees, grass or buildings would change that.</p>
+      <ol>
+        <li><i class="ph ph-tree"></i><span>Pick a tool and make a change on either map.</span></li>
+        <li><i class="ph ph-play"></i><span>Press <b>Simulate</b> to see how much cooler or hotter it gets.</span></li>
+        <li><i class="ph ph-clock"></i><span>Move the time slider to see the effect through the day.</span></li>
+      </ol>
+      <div class="welcome-actions">
+        <button id="welcomeExample"><i class="ph ph-sparkle"></i><span>Try an example</span></button>
+        <button id="welcomeClose" class="primary">Got it</button>
+      </div>
+    </div>
+  </div>
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="mcp-sync.js"></script>

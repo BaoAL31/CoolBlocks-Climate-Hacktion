@@ -10,7 +10,7 @@ const state = {
   result: null,        // last /simulate response
   edits: [],           // edits sent to the backend
   tool: 'pan',
-  draft: null,         // box being dragged: {start: LngLat, ring: [[lng,lat]...]}
+  draft: null,         // box being dragged: {map, start: screen point, ring: [[lng,lat]...]}
   trees: [],           // existing trees from the backend: [{lng, lat, height, radius}]
   buildings: null,     // existing building footprints (GeoJSON, each with properties.idx)
   probe: null,         // last spot checked with the Temperature tool: {map, lngLat}
@@ -133,6 +133,9 @@ function addVectorLayers(map, heat) {
              'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-opacity': heat ? 0.5 : 0.9 } });
   map.addLayer({ id: 'draft-fill', type: 'fill', source: 'draft', paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.25 } });
   map.addLayer({ id: 'draft-line', type: 'line', source: 'draft', paint: { 'line-color': ['get', 'color'], 'line-width': 2 } });
+  map.addSource('handles', { type: 'geojson', data: EMPTY });
+  map.addLayer({ id: 'handles', type: 'circle', source: 'handles',
+    paint: { 'circle-radius': 6, 'circle-color': '#ffffff', 'circle-stroke-color': ['get', 'color'], 'circle-stroke-width': 2.5 } });
 }
 
 // ---------------------------------------------------------------- edits -> display
@@ -237,6 +240,8 @@ function refreshEdits() {
     if (m.getLayer('buildings-3d')) m.setFilter('buildings-3d', ['!', ['in', ['get', 'idx'], ['literal', gone]]]);
   });
   refreshTrees();
+  refreshChanges();
+  refreshDraft();  // corner circles follow the latest box
   $('simulate').querySelector('span').textContent = state.edits.length ? `Simulate (${state.edits.length})` : 'Simulate';
 }
 
@@ -247,9 +252,93 @@ function toolColor() {
 }
 
 function refreshDraft() {
-  const ring = state.draft?.ring;
+  let ring = state.draft?.ring;
+  const poly = state.poly;
+  if (poly) {  // corners clicked so far, plus the mouse position, closed back to the first corner
+    const pts = poly.cursor ? [...poly.pts, poly.cursor] : poly.pts;
+    ring = pts.length >= 2 ? [...pts, pts[0]] : null;
+  }
   const feats = ring ? [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] }, properties: { color: toolColor() } }] : [];
   maps.forEach((m) => m.getSource('draft')?.setData({ type: 'FeatureCollection', features: feats }));
+  const pts = handlePoints().map((c) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: c }, properties: { color: toolColor() } }));
+  maps.forEach((m) => m.getSource('handles')?.setData({ type: 'FeatureCollection', features: pts }));
+}
+
+// Corner circles: the corners clicked so far while drawing a shape, otherwise the corners of the last
+// box or shape (drag one to resize it).
+function lastShapeIndex() {
+  if (!BOX_TOOLS.includes(state.tool)) return -1;
+  for (let i = state.edits.length - 1; i >= 0; i--) if (state.edits[i].geometry.type === 'Polygon') return i;
+  return -1;
+}
+
+function handlePoints() {
+  if (state.poly) return state.poly.pts;
+  const i = lastShapeIndex();
+  return i < 0 ? [] : state.edits[i].geometry.coordinates[0].slice(0, -1);
+}
+
+function grabHandle(m, point) {
+  if (state.poly) return null;
+  const i = lastShapeIndex();
+  if (i < 0) return null;
+  const ring = state.edits[i].geometry.coordinates[0];
+  for (let k = 0; k < ring.length - 1; k++) if (m.project(ring[k]).dist(point) < 12) return { map: m, edit: i, corner: k };
+  return null;
+}
+
+function flashHint(text) {
+  $('drawHint').textContent = text;
+  $('drawHint').classList.remove('hidden');
+}
+function restoreHint() {
+  $('drawHint').textContent = HINTS[state.tool] || '';
+  $('drawHint').classList.toggle('hidden', !HINTS[state.tool]);
+}
+
+// ---------------------------------------------------------------- your changes list
+
+const CHANGE_ICONS = { add_tree: 'ph-tree', remove_trees: 'ph-axe', surface: 'ph-paint-roller', building: 'ph-buildings' };
+const SURFACE_NAMES = { grass: 'grass', cool_asphalt: 'cool asphalt', asphalt: 'dark asphalt', paving: 'paving', soil: 'bare soil', water: 'water' };
+
+function describe(e) {
+  if (e.type === 'add_tree') return `Planted a ${e.size} tree`;
+  if (e.type === 'remove_trees') return 'Removed trees';
+  if (e.type === 'surface') return `Changed ground to ${SURFACE_NAMES[e.surface]}`;
+  if (e.demolish) return 'Demolished a building';
+  return `Building, ${e.height} m tall`;
+}
+
+let shownChanges = 0;
+function refreshChanges() {
+  const box = $('changes');
+  box.innerHTML = state.edits.map((e, i) => {
+    const icon = e.demolish ? 'ph-bulldozer' : CHANGE_ICONS[e.type];
+    const dot = e.type === 'surface' ? `<span class="dot" style="background:${SURFACE_COLORS[e.surface]}"></span>` : '';
+    return `<button class="chip${i >= shownChanges ? ' new' : ''}" data-i="${i}" title="${describe(e)}. Click to remove." aria-label="Remove: ${describe(e)}">`
+      + `<i class="ph ${icon} kind"></i><i class="ph ph-trash bin"></i>${dot}</button>`;
+  }).join('');
+  shownChanges = state.edits.length;
+  box.scrollLeft = box.scrollWidth;
+}
+
+$('changes').addEventListener('click', (ev) => {
+  const chip = ev.target.closest('.chip');
+  if (chip) removeEdit(Number(chip.dataset.i));
+});
+
+// remove one edit (and any demolish of it), keeping the other edits' references right
+function removeEdit(i) {
+  // drop the edit (and a demolish of it), then re-map demolish.edit indexes to the new positions
+  const newIndex = [];
+  let k = 0;
+  state.edits.forEach((e, j) => { newIndex[j] = (j === i || e.demolish?.edit === i) ? -1 : k++; });
+  state.edits = state.edits.filter((e, j) => newIndex[j] >= 0)
+    .map((e) => (e.demolish?.edit != null ? { ...e, demolish: { edit: newIndex[e.demolish.edit] } } : e));
+  shownChanges = state.edits.length;
+  state.result = null;
+  refreshEdits();
+  render();
 }
 
 function addEdit(e) {
@@ -268,15 +357,16 @@ const HINTS = {
   probe: 'Click any spot on either map to see how hot it feels there.',
   demolish: 'Click a building (existing or one you added) to knock it down. Undo brings it back.',
   tree: 'Click (or tap) on either map to plant a tree.',
-  remove_trees: 'Drag a box over trees to remove them. Esc cancels.',
-  surface: 'Drag a box over the ground to change its surface. Esc cancels.',
-  building: 'Drag a box to add a building, or over one to change its height. Esc cancels.',
+  remove_trees: 'Drag a box over trees, or click corners for any shape (click the first corner to finish). Esc cancels.',
+  surface: 'Drag a box over the ground, or click corners for any shape (click the first corner to finish). Esc cancels.',
+  building: 'Drag a box, or click corners for any shape (click the first corner to finish). Esc cancels.',
 };
 
 function setTool(tool) {
   if (tool !== 'probe') closeProbe();
   state.tool = tool;
   state.draft = null;
+  state.poly = null;
   refreshDraft();
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === tool));
   document.querySelectorAll('.option').forEach((o) => o.classList.toggle('show', o.dataset.for === tool));
@@ -285,27 +375,59 @@ function setTool(tool) {
   const box = BOX_TOOLS.includes(tool);
   maps.forEach((m) => {
     m.getCanvas().style.cursor = tool === 'pan' ? '' : tool === 'demolish' ? 'pointer' : 'crosshair';
-    if (box) { m.dragPan.disable(); m.touchZoomRotate.disable(); } else { m.dragPan.enable(); m.touchZoomRotate.enable(); }
+    if (box) { m.dragPan.disable(); m.touchZoomRotate.disable(); m.doubleClickZoom.disable(); } else { m.dragPan.enable(); m.touchZoomRotate.enable(); m.doubleClickZoom.enable(); }
   });
 }
 
-// A box on the ground, lined up with the screen (so it looks like a rectangle at any map rotation).
-function groundBox(a, b, bearing) {
-  const mLat = 111320, mLng = 111320 * Math.cos(a.lat * Math.PI / 180);
-  const dx = (b.lng - a.lng) * mLng, dy = (b.lat - a.lat) * mLat;  // metres east, north
-  const t = bearing * Math.PI / 180;
-  const right = [Math.cos(t), -Math.sin(t)], up = [Math.sin(t), Math.cos(t)];
-  const du = dx * right[0] + dy * right[1], dv = dx * up[0] + dy * up[1];
-  const pt = (u, v) => [a.lng + (u * right[0] + v * up[0]) / mLng, a.lat + (u * right[1] + v * up[1]) / mLat];
-  return { ring: [pt(0, 0), pt(du, 0), pt(du, dv), pt(0, dv), pt(0, 0)], size: Math.min(Math.abs(du), Math.abs(dv)) };
+// A box drawn on the screen, laid onto the ground: it covers exactly what the person sees inside the
+// rectangle they dragged, at any rotation or tilt.
+function screenBox(m, p0, p1) {
+  const ring = [[p0.x, p0.y], [p1.x, p0.y], [p1.x, p1.y], [p0.x, p1.y]].map(([x, y]) => {
+    const ll = m.unproject([x, y]);
+    return [ll.lng, ll.lat];
+  });
+  ring.push(ring[0]);
+  return { ring, size: Math.min(Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y)) / 4 };
 }
 
 function finishBox() {
+  if (state.grab) {  // finished resizing a box
+    state.grab = null;
+    state.result = null;
+    refreshEdits();
+    render();
+    return;
+  }
   const d = state.draft;
   state.draft = null;
   refreshDraft();
-  if (!d || d.size < 1) return;  // just a click, not a drag
-  const geometry = { type: 'Polygon', coordinates: [d.ring] };
+  if (!d) return;
+  if (d.size < 1) return addCorner(d.map, d.start);  // a click, not a drag: it's a corner of a shape
+  addShape([d.ring]);
+}
+
+// Click-the-corners shapes, for areas that don't line up with the screen.
+function addCorner(m, point) {
+  const ll = m.unproject(point);
+  const poly = state.poly || (state.poly = { map: m, pts: [] });
+  if (poly.map !== m) return;
+  if (poly.pts.length >= 3 && m.project(poly.pts[0]).dist(point) < 12) return finishShape();  // clicked the first corner
+  poly.pts.push([ll.lng, ll.lat]);
+  refreshDraft();
+  const n = poly.pts.length;
+  flashHint(n < 3 ? `Point ${n} added. Click the next corner.` : `Point ${n} added. Click the first point to finish, or press Enter.`);
+}
+
+function finishShape() {
+  const poly = state.poly;
+  state.poly = null;
+  restoreHint();
+  refreshDraft();
+  if (poly && poly.pts.length >= 3) addShape([[...poly.pts, poly.pts[0]]]);
+}
+
+function addShape(coordinates) {
+  const geometry = { type: 'Polygon', coordinates };
   if (state.tool === 'remove_trees') addEdit({ type: 'remove_trees', geometry });
   if (state.tool === 'surface') addEdit({ type: 'surface', surface: $('surfaceType').value, geometry });
   if (state.tool === 'building') addEdit({ type: 'building', height: Math.max(0, Number($('buildingHeight').value) || 0), geometry });
@@ -321,11 +443,25 @@ maps.forEach((m) => {
     if (!BOX_TOOLS.includes(state.tool)) return;
     if (ev.originalEvent.touches && ev.originalEvent.touches.length > 1) return;
     ev.preventDefault();
-    state.draft = { start: ev.lngLat, ring: null, size: 0 };
+    state.grab = grabHandle(m, ev.point);
+    if (state.grab) return;
+    if (state.poly) { state.draft = { map: m, start: ev.point, ring: null, size: 0, corner: true }; return; }  // mid-shape: clicks only
+    state.draft = { map: m, start: ev.point, ring: null, size: 0 };
   };
   const move = (ev) => {
-    if (!state.draft) return;
-    Object.assign(state.draft, groundBox(state.draft.start, ev.lngLat, m.getBearing()));
+    const g = state.grab;
+    if (g && g.map === m) {
+      const ring = state.edits[g.edit].geometry.coordinates[0];
+      ring[g.corner] = [ev.lngLat.lng, ev.lngLat.lat];
+      if (g.corner === 0) ring[ring.length - 1] = ring[0];
+      maps.forEach((mm) => mm.getSource('edits')?.setData(editFeatures()));
+      refreshDraft();
+      return;
+    }
+    if (!state.draft && !state.poly && BOX_TOOLS.includes(state.tool)) m.getCanvas().style.cursor = grabHandle(m, ev.point) ? 'move' : 'crosshair';
+    if (state.poly && state.poly.map === m) { state.poly.cursor = [ev.lngLat.lng, ev.lngLat.lat]; refreshDraft(); }
+    if (!state.draft || state.draft.map !== m || state.draft.corner) return;
+    Object.assign(state.draft, screenBox(m, state.draft.start, ev.point));
     refreshDraft();
   };
   m.on('mousedown', start);
@@ -407,9 +543,10 @@ async function probe() {
 }  // also catches a drag released outside the map
 
 document.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Escape') { state.draft = null; refreshDraft(); }
+  if (ev.key === 'Escape') { state.draft = null; state.poly = null; restoreHint(); refreshDraft(); }
+  if (ev.key === 'Enter' && state.poly) finishShape();
 });
-$('undo').onclick = () => { state.edits.pop(); state.result = null; refreshEdits(); render(); };
+$('undo').onclick = () => { state.edits.pop(); shownChanges = state.edits.length; state.result = null; refreshEdits(); render(); };
 $('clear').onclick = () => { state.edits = []; state.result = null; refreshEdits(); render(); };
 
 // ---------------------------------------------------------------- time + weather
@@ -531,6 +668,41 @@ $('simulate').onclick = async () => {
   refreshEdits();
   render();
 };
+
+// ---------------------------------------------------------------- welcome + example
+
+function closeWelcome() {
+  $('welcome').classList.add('hidden');
+  try { localStorage.setItem('coolblocks-welcomed', '1'); } catch (e) { /* private mode */ }
+}
+$('welcomeClose').onclick = closeWelcome;
+$('welcomeExample').onclick = () => { closeWelcome(); runExample(); };
+try { if (!localStorage.getItem('coolblocks-welcomed')) $('welcome').classList.remove('hidden'); } catch (e) { $('welcome').classList.remove('hidden'); }
+
+// plant a row of street trees along the road nearest the middle of the area, then simulate
+async function runExample() {
+  if (!state.area) return;
+  try {
+    const { points, date } = await api('example');
+    if (!points.length) throw new Error('no street found');
+    if (date && state.date !== date) {  // a known hot day, so the difference is clear
+      state.date = date;
+      $('date').value = date;
+      state.result = null;
+      await loadBaseline();
+    }
+    points.forEach((p) => state.edits.push({ type: 'add_tree', size: 'medium', geometry: { type: 'Point', coordinates: p } }));
+    const lng = points.reduce((a, p) => a + p[0], 0) / points.length, lat = points.reduce((a, p) => a + p[1], 0) / points.length;
+    mapReal.easeTo({ center: [lng, lat], zoom: 17.6, duration: 800 });
+    state.result = null;
+    refreshEdits();
+    render();
+    $('simulate').click();
+  } catch (err) {
+    $('status').textContent = `Couldn't make the example: ${err.message}`;
+  }
+}
+$('example').onclick = runExample;
 
 // ---------------------------------------------------------------- phone: one map at a time
 

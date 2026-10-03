@@ -1,5 +1,7 @@
 # CoolBlocks
 
+**🌳 Try it live: [coolblocks.cool](https://coolblocks.cool)**
+
 **Plant a tree, change a pavement or reshape a building on a 3D map of the University of Sydney, and see how much cooler (or hotter) the street would feel, hour by hour.**
 
 Built for **Climate Hack-tion 2026** · *Build for 2035* · COP31 priority: **Resilient Cities & Buildings** (helping cities cope with heatwaves).
@@ -15,6 +17,38 @@ Heatwaves are a major health risk in Australian cities, and heat isn't spread ev
 - **Simulate:** a physics model recalculates shade and heat for the edited area and shows the before/after change.
 - **Time of day:** a slider from 9am to 6pm shows how shade and heat move through the day.
 - **Real weather:** live hourly weather for Camperdown, or any past day (e.g. a heatwave).
+
+## Screenshots
+ 
+![Welcome screen over the two synced views](docs/screenshots/welcome.PNG)
+*Opening view: the real world on the left and "feels like" heat on the right, with a short welcome guide.*
+ 
+![The tool bar](docs/screenshots/features.PNG)
+*Tools: move the map, check a spot's temperature, plant or remove trees, change the ground, add or knock down buildings.*
+ 
+### Trees cool the street
+![Ten new street trees shown in the Change view](docs/screenshots/change.PNG)
+*"Try an example" plants 10 street trees on a real hot day (19 Dec 2025). Blue shows where it now feels cooler.*
+ 
+![Temperature check at one spot](docs/screenshots/temperature.PNG)
+*Click any spot to compare: under the new trees it feels 5.5 °C cooler (45.6 °C down to 40.1 °C).*
+ 
+![Time and day controls](docs/screenshots/timeslider.PNG)
+*Choose the day and move through the hours from 9 am to 6 pm.*
+ 
+### Change the city
+![Adding a building](docs/screenshots/addbuilding.PNG)
+*Add a building: it casts new shade, but the trees it replaces make the area around it hotter (red).*
+ 
+![Removing trees](docs/screenshots/removetrees.PNG)
+*Remove trees: losing shade makes that spot feel hotter.*
+ 
+![Demolishing a building](docs/screenshots/demolish.PNG)
+*Demolish a building and see how the heat changes where it stood.*
+ 
+<img src="docs/screenshots/boxtool.PNG" width="32%" alt="Drawing a shape with corner handles"> <img src="docs/screenshots/removeitem.PNG" width="66%" alt="List of your changes">
+ 
+*Left: draw any shape by clicking its corners, and drag the circles to resize it. Right: every change you make is listed, and clicking one deletes it.*
 
 ## How it works
 ```

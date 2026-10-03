@@ -28,6 +28,8 @@ import io
 import json
 import logging
 import os
+import threading
+import shutil
 import tempfile
 import uuid
 from datetime import date as Date
@@ -199,8 +201,22 @@ def get_weather(day: str | None, hours: list[int]):
 # ------------------------------------------------------------------ SOLWEIG helpers
 
 
+# Several visitors can ask at once. SOLWEIG runs one at a time (it shares the GPU and writes temporary
+# files), and each run gets its own folder so runs never trip over each other's files.
+_SOLWEIG_LOCK = threading.Lock()
+_BASELINE_LOCK = threading.Lock()
+
+
 def _run(name, dsm, dem, cdsm, lc, weather, location):
-    out = WORK / name
+    with _SOLWEIG_LOCK:
+        out = WORK / f"{name}_{uuid.uuid4().hex[:8]}"
+        try:
+            return _run_in(out, dsm, dem, cdsm, lc, weather, location)
+        finally:
+            shutil.rmtree(out, ignore_errors=True)
+
+
+def _run_in(out, dsm, dem, cdsm, lc, weather, location):
     # SOLWEIG modifies input arrays in place (e.g. cdsm), so always hand it copies
     dsm, dem, cdsm, lc = (None if a is None else a.copy() for a in (dsm, dem, cdsm, lc))
     surface = solweig.SurfaceData.prepare(
@@ -332,6 +348,23 @@ app = FastAPI(title="CoolBlocks API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
+@app.on_event("startup")
+def _warm_up():
+    """On a hosted server, work out the heat maps for the example day and today in the background,
+    so the first visitor doesn't wait. Set COOLBLOCKS_WARMUP=1 to turn this on (the Dockerfile does)."""
+    if os.environ.get("COOLBLOCKS_WARMUP") != "1":
+        return
+
+    def run():
+        for day in ("2025-12-19", None):
+            try:
+                _baseline_once(day)
+            except Exception as e:  # never stop the server over a warm-up
+                print(f"coolblocks: warm-up for {day or 'today'} failed ({e})")
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 @app.get("/api/area")
 def area():
     return {"source": AREA.source, "size_m": [AREA.w, AREA.h], "bounds": AREA.bounds_lonlat(),
@@ -424,7 +457,13 @@ def baseline(date: str | None = None):
     """Heat + shadow images for the whole area, before any edits. First call takes a while; then cached."""
     if date:
         Date.fromisoformat(date)
-    return _baseline(date, tuple(DEFAULT_HOURS))
+    return _baseline_once(date)
+
+
+def _baseline_once(day: str | None):
+    """Two people opening the app together wait for one heat map instead of both computing it."""
+    with _BASELINE_LOCK:
+        return _baseline(day, tuple(DEFAULT_HOURS))
 
 
 @app.post("/api/simulate")
@@ -484,6 +523,45 @@ def simulate(req: SimRequest):
     while len(_SIMS) > 8:
         _SIMS.pop(next(iter(_SIMS)))
     return {"sim_id": sim_id, "weather_source": src, "bounds": AREA.bounds_lonlat(r0, r1, c0, c1), "hours": hours}
+
+
+@app.get("/api/example")
+def example(n: int = 10, spacing: float = 7.0):
+    """Points for a strip of street trees (for the "Try an example" button).
+
+    Tries road cells near the middle of the area, follows the street's direction, snaps each tree to open
+    ground (road or paving, no existing tree, no roof) within 4 m, and keeps the strip with the most trees."""
+    open_ground = np.isin(AREA.lc, (0, 1)) & (np.nan_to_num(AREA.cdsm) < 1)
+    road = (AREA.lc == 1) & open_ground
+    rr, cc = np.nonzero(road)
+    if len(rr) == 0:
+        raise HTTPException(404, "no open road in this area")
+    order = np.argsort((rr - AREA.h / 2) ** 2 + (cc - AREA.w / 2) ** 2)
+    canopy = np.nan_to_num(AREA.cdsm) >= 1
+    best, best_score = [], None
+    for i in order[:1200:10]:  # 120 candidate starting points, nearest the middle first
+        r0, c0 = rr[i], cc[i]
+        near = ((rr - r0) ** 2 + (cc - c0) ** 2) < 40 ** 2
+        if near.sum() < 20:
+            continue
+        direction = np.linalg.eigh(np.cov(np.stack([rr[near] - r0, cc[near] - c0])))[1][:, -1]
+        pts = []
+        for k in np.arange(n) - (n - 1) / 2:
+            r, c = int(round(r0 + k * spacing * direction[0])), int(round(c0 + k * spacing * direction[1]))
+            if not (0 <= r < AREA.h and 0 <= c < AREA.w):
+                continue
+            ra, ca = max(0, r - 4), max(0, c - 4)
+            ys, xs = np.nonzero(open_ground[ra:r + 5, ca:c + 5])
+            if len(ys):
+                j = np.argmin((ys + ra - r) ** 2 + (xs + ca - c) ** 2)  # nearest open cell
+                pts.append((ys[j] + ra, xs[j] + ca))
+        # prefer full strips that sit away from existing trees, so the new shade shows up clearly
+        crowd = np.mean([canopy[max(0, r - 10):r + 11, max(0, c - 10):c + 11].mean() for r, c in pts]) if pts else 1
+        score = (len(pts), -crowd)
+        if best_score is None or score > best_score:
+            best, best_score = pts, score
+    to_ll = AREA.to_lonlat.transform
+    return {"points": [list(to_ll(*(AREA.transform * (c + 0.5, r + 0.5)))) for r, c in best], "date": "2025-12-19"}
 
 
 SURFACE_NAMES = {0: "paving", 1: "dark asphalt", 2: "roof", 3: "cool asphalt", 5: "grass", 6: "bare soil", 7: "water"}
