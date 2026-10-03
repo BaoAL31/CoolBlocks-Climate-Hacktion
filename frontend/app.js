@@ -569,4 +569,24 @@ document.querySelectorAll('[data-view]').forEach((b) => b.tagName === 'BUTTON' &
   $('hour').max = Math.max(...state.area.hours);
   render();
   loadBaseline();
+  startMcpSync({
+    request: api,
+    snapshot: () => ({
+      date: state.date || null, hour: state.hour,
+      edits: state.edits.map(({ demolish: _, ...edit }) => edit),
+      selected_point: state.probe ? { lon: state.probe.lngLat.lng, lat: state.probe.lngLat.lat } : null,
+      map_center: [mapReal.getCenter().lng, mapReal.getCenter().lat],
+      baseline: state.baseline, result: state.result,
+    }),
+    apply: (event) => {
+      if ('date' in event) { state.date = event.date || ''; $('date').value = state.date; }
+      if ('hour' in event) { state.hour = event.hour; $('hour').value = state.hour; }
+      if (event.edits) { state.edits = event.edits; state.result = null; refreshEdits(); }
+      if ('baseline' in event) state.baseline = event.baseline;
+      if ('result' in event) state.result = event.result;
+      render();
+      probe();
+    },
+    status: (message) => { $('status').textContent = message; },
+  });
 })();

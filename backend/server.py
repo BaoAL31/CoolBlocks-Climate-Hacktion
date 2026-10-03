@@ -52,6 +52,8 @@ from rasterio.transform import from_origin
 from rasterio.warp import transform_geom
 
 import live_weather
+from agent_tools import AgentTools, serialized_compute
+from agent_routes import install_agents
 
 logging.getLogger("solweig").setLevel(logging.WARNING)
 log = logging.getLogger("coolblocks")
@@ -416,6 +418,7 @@ def _baseline(day: str | None, hours: tuple[int, ...]):
 
 
 @app.get("/api/baseline")
+@serialized_compute
 def baseline(date: str | None = None):
     """Heat + shadow images for the whole area, before any edits. First call takes a while; then cached."""
     if date:
@@ -424,6 +427,7 @@ def baseline(date: str | None = None):
 
 
 @app.post("/api/simulate")
+@serialized_compute
 def simulate(req: SimRequest):
     if not req.edits:
         raise HTTPException(400, "no edits")
@@ -513,6 +517,19 @@ def point(lon: float, lat: float, hour: int, date: str | None = None, sim_id: st
             out.update(after=out["before"], shade_after=out["shade_before"])
     return out
 
+
+def _is_roof(lon, lat):
+    x, y = Transformer.from_crs("EPSG:4326", CRS, always_xy=True).transform(lon, lat)
+    c, r = ~AREA.transform * (x, y)
+    return not (0 <= r < AREA.h and 0 <= c < AREA.w) or AREA.lc[int(r), int(c)] == 2
+
+
+AGENT_TOOLS = AgentTools(
+    {'area': area, 'buildings': buildings, 'trees': trees, 'weather': weather,
+     'baseline': baseline, 'simulate': simulate, 'point': point, 'is_roof': _is_roof,
+     'backend': lambda: getattr(solweig, 'get_compute_backend', lambda: 'unknown')()}, Edit, SimRequest,
+)
+MCP = install_agents(app, AGENT_TOOLS)
 
 # Serve the frontend from the same server (http://127.0.0.1:8000/)
 FRONTEND = HERE.parent / "frontend"

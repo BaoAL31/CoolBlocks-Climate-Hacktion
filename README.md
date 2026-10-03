@@ -39,6 +39,14 @@ The real USYD area data is in the repo (`backend/data/`), so it works straight a
 server builds the tree-height map from the canopy file (a second or two). Without area data it falls back to a
 **synthetic demo block**.
 
+### External agents and MCP
+
+External agents can inspect the current map, weather, temperatures and shade,
+stage hypothetical edits and run before/after simulations. Connect to
+`http://127.0.0.1:8000/mcp/` after starting the app. No model API key or in-app chat
+is required. See [MCP setup and tool guide](MCP.md) for HTTP/stdio connections,
+scene synchronization and example workflows.
+
 ### Rebuild the USYD area (only needed to change the area)
 ```bash
 cd backend
