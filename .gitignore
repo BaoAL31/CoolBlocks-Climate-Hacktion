@@ -1,0 +1,11 @@
+# data is rebuilt by backend/scripts/build_area.py (canopy licence is No-Derivatives: don't commit derived rasters)
+backend/data/*
+!backend/data/README.md
+*.tif
+*.tiff
+__pycache__/
+.venv/
+venv/
+*.pyc
+.DS_Store
+node_modules/
