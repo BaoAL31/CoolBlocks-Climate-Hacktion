@@ -610,10 +610,14 @@ function render() {
     const d = res.utci_change_mean, best = res.utci_change_min, worst = res.utci_change_max;
     const cooler = best < 0;  // the big number is the best spot, or the hottest one if nothing got cooler
     const top = cooler ? best : worst;
-    const avg = `${d <= 0 ? '−' : '+'}${Math.abs(d).toFixed(1)} °C`;
-    card.innerHTML = `<div class="big ${cooler ? 'cool' : 'hot'}">${cooler ? '−' : '+'}${Math.abs(top).toFixed(1)} °C</div>`
+    const was = res[`utci_${cooler ? 'best' : 'worst'}_before`], now = res[`utci_${cooler ? 'best' : 'worst'}_after`];
+    const arrow = (up) => `<i class="ph ph-arrow-${up ? 'up' : 'down'}" aria-hidden="true"></i>`;
+    const avg = `${Math.abs(d).toFixed(1)} °C ${d <= 0 ? 'cooler' : 'hotter'}`;
+    card.innerHTML = `<div class="big ${cooler ? 'cool' : 'hot'}" aria-label="${Math.abs(top).toFixed(1)} degrees ${cooler ? 'cooler' : 'hotter'}">`
+      + `${arrow(!cooler)}${Math.abs(top).toFixed(1)} °C</div>`
       + `<div class="lines"><strong>${cooler ? 'Coolest' : 'Hottest'} spot near your changes at ${fmtHour(res.hour)}</strong>`
-      + `<span>Average ${avg} nearby${cooler && worst > 0.5 ? `, some spots <b class="hot">+${worst.toFixed(1)} °C</b>` : ''}. Air ${res.air_temp.toFixed(0)} °C.</span></div>`;
+      + `<span>${was != null ? `Feels like ${was.toFixed(1)} °C before, <b class="${cooler ? 'cool' : 'hot'}">${now.toFixed(1)} °C after</b>. ` : ''}`
+      + `${avg} on average nearby${cooler && worst > 0.5 ? `, some spots <b class="hot">${arrow(true)}${worst.toFixed(1)} °C hotter</b>` : ''}.</span></div>`;
   } else if (base) {
     card.innerHTML = `<div class="big">${base.utci_ground_mean.toFixed(0)} °C</div>`
       + `<div class="lines"><strong>How hot the streets feel at ${fmtHour(base.hour)}</strong>`
@@ -699,6 +703,75 @@ function closeWelcome() {
 }
 $('welcomeClose').onclick = closeWelcome;
 $('welcomeExample').onclick = () => { closeWelcome(); runExample(); };
+$('welcomeGuide').onclick = () => { closeWelcome(); startTour(); };
+$('guide').onclick = () => startTour();
+
+// ---------------------------------------------------------------- guide me tour
+// a spotlight that walks through each part of the screen; steps whose part is hidden (e.g. on a phone) are skipped
+const TOUR = [
+  { el: '#tools', title: 'Pick a tool', text: 'Pan moves the map. Temperature shows how hot one spot feels. Tree, Remove trees, Surface, Building and Demolish change the area.' },
+  { el: '.actions', title: 'Run it', text: 'Try an example plants ten street trees for you. Undo and the bin take changes back. Simulate works out how the heat changes.' },
+  { el: '[data-pane="real"]', title: 'The real world', text: 'An aerial photo with the shade at the chosen time. Draw your changes here or on the heat map.' },
+  { el: '[data-pane="heat"]', title: 'How hot it feels', text: 'The "feels like" temperature for people outside. After Simulate, switch to Change: blue got cooler, red got hotter.' },
+  { el: '.time', title: 'Time and day', text: 'Slide from 9 am to 6 pm. Pick any day since 1980, or press Live for today\'s weather.' },
+  { el: '#card', title: 'Your result', text: 'The biggest change near your edits, with the "feels like" temperature before and after. Blue arrow down is cooler, orange arrow up is hotter.' },
+];
+let tour = null;
+function startTour() {
+  const steps = TOUR.filter((s) => { const r = document.querySelector(s.el)?.getBoundingClientRect(); return r && r.width > 0 && r.height > 0; });
+  if (!steps.length) return;
+  const root = document.createElement('div');
+  root.className = 'tour';
+  root.innerHTML = '<div class="tour-spot"></div><div class="tour-tip" role="dialog" aria-modal="true" aria-labelledby="tourTitle">'
+    + '<div class="tour-count"></div><h2 id="tourTitle"></h2><p></p><div class="tour-actions">'
+    + '<button class="tour-skip">Skip</button><span class="grow"></span><button class="tour-back">Back</button><button class="tour-next primary">Next</button></div></div>';
+  document.body.append(root);
+  tour = { root, steps, i: 0 };
+  root.querySelector('.tour-skip').onclick = endTour;
+  root.querySelector('.tour-back').onclick = () => showStep(tour.i - 1);
+  root.querySelector('.tour-next').onclick = () => (tour.i === steps.length - 1 ? endTour() : showStep(tour.i + 1));
+  root.addEventListener('click', (ev) => { if (ev.target === root) endTour(); });
+  showStep(0);
+  root.querySelector('.tour-next').focus();
+}
+function endTour() {
+  if (!tour) return;
+  tour.root.remove();
+  tour = null;
+}
+function showStep(i) {
+  if (!tour || i < 0 || i >= tour.steps.length) return;
+  tour.i = i;
+  const step = tour.steps[i], { root } = tour;
+  const r = document.querySelector(step.el).getBoundingClientRect();
+  const pad = 6, spot = root.querySelector('.tour-spot'), tip = root.querySelector('.tour-tip');
+  const x0 = Math.max(3, r.left - pad), y0 = Math.max(3, r.top - pad);  // keep the outline on screen
+  const x1 = Math.min(innerWidth - 3, r.right + pad), y1 = Math.min(innerHeight - 3, r.bottom + pad);
+  Object.assign(spot.style, { left: `${x0}px`, top: `${y0}px`, width: `${x1 - x0}px`, height: `${y1 - y0}px` });
+  root.querySelector('.tour-count').textContent = `${i + 1} of ${tour.steps.length}`;
+  root.querySelector('h2').textContent = step.title;
+  root.querySelector('p').textContent = step.text;
+  root.querySelector('.tour-back').disabled = i === 0;
+  root.querySelector('.tour-next').textContent = i === tour.steps.length - 1 ? 'Done' : 'Next';
+  // put the card below the highlighted part if it fits, otherwise above it, otherwise inside it
+  const tw = Math.min(340, innerWidth - 32), th = tip.offsetHeight || 170, gap = 14;
+  let top = r.bottom + pad + gap;
+  if (top + th > innerHeight - 16) top = r.top - pad - gap - th;
+  if (top < 16) top = r.top + r.height / 2 - th / 2;  // big parts like the maps: in the middle of them
+  top = Math.min(Math.max(16, top), innerHeight - th - 16);
+  const left = Math.min(Math.max(16, r.left + r.width / 2 - tw / 2), innerWidth - tw - 16);
+  Object.assign(tip.style, { width: `${tw}px`, left: `${left}px`, top: `${top}px` });
+  tip.classList.remove('in');
+  void tip.offsetWidth;  // restart the fade-in
+  tip.classList.add('in');
+}
+addEventListener('resize', () => tour && showStep(tour.i));
+addEventListener('keydown', (ev) => {
+  if (!tour) return;
+  if (ev.key === 'Escape') endTour();
+  else if (ev.key === 'ArrowRight') showStep(tour.i + 1);
+  else if (ev.key === 'ArrowLeft') showStep(tour.i - 1);
+});
 try { if (!localStorage.getItem('coolblocks-welcomed')) $('welcome').classList.remove('hidden'); } catch (e) { $('welcome').classList.remove('hidden'); }
 
 // plant a row of street trees along the road nearest the middle of the area, then simulate

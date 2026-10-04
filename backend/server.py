@@ -502,6 +502,12 @@ def simulate(req: SimRequest):
                 "utci_change_mean": float(np.nanmean(d[zone])),
                 "utci_change_edited_cells": float(np.nanmean(d[edited & ground])) if (edited & ground).any() else 0.0,
                 "utci_change_min": float(np.nanmin(d[zone])), "utci_change_max": float(np.nanmax(d[zone]))}
+        # "feels like" before and after at the coolest and hottest changed spot, for the result card
+        dz = np.where(zone, d, np.nan)
+        if np.isfinite(dz).any():
+            for key, idx in (("best", np.nanargmin(dz)), ("worst", np.nanargmax(dz))):
+                item[f"utci_{key}_before"] = float(ub.flat[idx])
+                item[f"utci_{key}_after"] = float(ua.flat[idx])
         if req.images:
             # only changed cells are drawn, so the full-area baseline shows through everywhere else
             unchanged = roofs | (np.abs(d) < 0.2)

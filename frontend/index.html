@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
   <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.2/src/regular/style.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5.3.0/index.css">
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
   <header>
@@ -64,6 +64,7 @@
 
     <div class="actions">
       <button id="example" title="Plant 10 street trees on a hot day (19 Dec 2025) and simulate"><i class="ph ph-sparkle"></i><span>Try an example</span></button>
+      <button id="guide" class="icon-btn" title="Show me around" aria-label="Show me around"><i class="ph ph-question"></i></button>
       <button id="undo" class="icon-btn" title="Undo last change" aria-label="Undo"><i class="ph ph-arrow-counter-clockwise"></i></button>
       <button id="clear" class="icon-btn" title="Remove all changes" aria-label="Clear all changes"><i class="ph ph-trash"></i></button>
       <button id="simulate" class="primary"><i class="ph ph-play"></i><span>Simulate</span></button>
@@ -131,6 +132,7 @@
         <li><i class="ph ph-clock"></i><span>Move the time slider to see the effect through the day.</span></li>
       </ol>
       <div class="welcome-actions">
+        <button id="welcomeGuide"><i class="ph ph-compass"></i><span>Guide me</span></button>
         <button id="welcomeExample"><i class="ph ph-sparkle"></i><span>Try an example</span></button>
         <button id="welcomeClose" class="primary">Got it</button>
       </div>
@@ -139,6 +141,6 @@
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="mcp-sync.js?v=3"></script>
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

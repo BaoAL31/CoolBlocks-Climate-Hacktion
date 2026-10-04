@@ -105,6 +105,36 @@ header {
 .welcome-card li i { color: var(--accent); font-size: 20px; }
 .welcome-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
+/* guide me tour: a spotlight that moves between parts of the screen */
+.tour { position: fixed; inset: 0; z-index: 30; }
+.tour-spot {
+  position: fixed; border-radius: var(--r-float); pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(12, 18, 15, .62), 0 0 0 2px var(--accent);
+  transition: left .45s cubic-bezier(.2, .8, .2, 1), top .45s cubic-bezier(.2, .8, .2, 1), width .45s cubic-bezier(.2, .8, .2, 1), height .45s cubic-bezier(.2, .8, .2, 1);
+}
+.tour-spot::after {
+  content: ''; position: absolute; inset: -2px; border-radius: inherit; border: 2px solid var(--accent);
+  animation: tour-pulse 1.6s ease-out infinite;
+}
+@keyframes tour-pulse { from { opacity: .9; transform: scale(1); } to { opacity: 0; transform: scale(1.04); } }
+.tour-tip {
+  position: fixed; padding: 16px 18px 14px; border-radius: var(--r-float);
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow);
+  transition: left .45s cubic-bezier(.2, .8, .2, 1), top .45s cubic-bezier(.2, .8, .2, 1);
+}
+.tour-tip.in { animation: tour-in .35s ease-out; }
+@keyframes tour-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.tour-count { font-size: 12px; font-weight: 600; color: var(--accent); letter-spacing: .04em; text-transform: uppercase; }
+.tour-tip h2 { margin: 4px 0 6px; font-size: 17px; letter-spacing: -.01em; }
+.tour-tip p { margin: 0 0 14px; color: var(--muted); font-size: 14px; line-height: 1.45; }
+.tour-actions { display: flex; align-items: center; gap: 8px; }
+.tour-actions .grow { flex: 1; }
+.tour-skip { border-color: transparent; background: none; color: var(--muted); padding-left: 4px; }
+@media (prefers-reduced-motion: reduce) {
+  .tour-spot, .tour-tip { transition: none; }
+  .tour-spot::after, .tour-tip.in { animation: none; }
+}
+
 /* ---------------------------------------------------------------- maps */
 .view-tabs { display: none; grid-area: tabs; }
 main { grid-area: main; position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); min-height: 0; }
@@ -186,6 +216,10 @@ footer {
 .result .lines strong { font-weight: 600; }
 .result .lines span { color: var(--muted); font-size: 13px; }
 .result .hot { color: var(--hot); }
+.result .cool { color: var(--cool); }
+.result .big { display: flex; align-items: center; gap: 2px; }
+.result .big i { font-size: .9em; }
+.result .lines b i { font-size: .95em; vertical-align: -1px; }
 .status { color: var(--muted); font-size: 12px; text-align: right; }
 .status .warn { color: var(--hot); }
 
