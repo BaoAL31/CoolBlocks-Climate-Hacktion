@@ -36,6 +36,10 @@ const OSM = {
 const EMPTY = { type: 'FeatureCollection', features: [] };
 const BLANK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
+// the data behind the heat map (licences in backend/data/LICENSES.md)
+const DATA_CREDITS = 'Tree canopy © NSW DPHI (CC BY-NC-ND 4.0) · Buildings © OpenStreetMap contributors · '
+  + 'Terrain © Copernicus DEM · Weather <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> · Heat model SOLWEIG';
+
 function makeMap(container, base, baseDim) {
   return new maplibregl.Map({
     container,
@@ -49,7 +53,7 @@ function makeMap(container, base, baseDim) {
       ],
     },
     center: [151.187, -33.888], zoom: 16.3, pitch: 55, bearing: -20,
-    maxPitch: 75, attributionControl: { compact: true },
+    maxPitch: 75, attributionControl: { compact: true, customAttribution: DATA_CREDITS },
   });
 }
 
@@ -646,7 +650,7 @@ async function loadBaseline() {
   setLoading(`Loading ${what}…`);
   render();  // drop results from the previous day straight away
   $('live').classList.toggle('on', !state.date);
-  $('status').textContent = 'Working out the heat for the whole area. A new day takes about a minute.';
+  $('status').textContent = 'Working out the heat for the whole area. A new day can take a moment.';
   try {
     const baseline = await api(`baseline${state.date ? `?date=${state.date}` : ''}`);
     if (req !== baselineRequest) return;
