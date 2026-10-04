@@ -8,6 +8,8 @@
 
 Built for **Climate Hack-tion 2026** · *Build for 2035* · COP31 priority: **Resilient Cities & Buildings** (helping cities cope with heatwaves).
 
+https://github.com/user-attachments/assets/0e6cd2a0-587b-4e07-84b8-1ed81689efab
+
 ## The problem
 Heatwaves are a major health risk in Australian cities, and heat isn't spread evenly: open asphalt and car parks feel far hotter than shaded, leafy streets. Councils and campus planners have limited budgets for trees and cooler surfaces, and need to see **where** a change helps most **before** they spend.
 
