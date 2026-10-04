@@ -554,7 +554,15 @@ $('clear').onclick = () => { state.edits = []; state.result = null; refreshEdits
 const fmtHour = (h) => (h === 12 ? '12 pm' : h > 12 ? `${h - 12} pm` : `${h} am`);
 $('hour').oninput = (ev) => { state.hour = Number(ev.target.value); render(); };
 $('hour').onchange = () => probe();  // update the temperature popup once the slider is let go
-$('date').onchange = (ev) => { state.date = ev.target.value; state.result = null; loadBaseline(); };
+// only 1980 up to today can be picked (typed dates outside that are put back)
+const localDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+$('date').min = '1980-01-01';
+$('date').max = localDay(new Date());
+$('date').onchange = (ev) => {
+  const v = ev.target.value;
+  if (v && (v < ev.target.min || v > ev.target.max)) { ev.target.value = state.date; return; }
+  state.date = v; state.result = null; loadBaseline();
+};
 $('live').onclick = () => { $('date').value = ''; state.date = ''; state.result = null; loadBaseline(); };
 document.querySelectorAll('input[name=heatMode]').forEach((r) => r.addEventListener('change', (ev) => { state.heatMode = ev.target.value; render(); }));
 
