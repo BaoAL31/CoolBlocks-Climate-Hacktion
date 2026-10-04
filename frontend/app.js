@@ -318,14 +318,16 @@ function describe(e) {
 let shownChanges = 0;
 function refreshChanges() {
   const box = $('changes');
-  box.innerHTML = state.edits.map((e, i) => {
+  if (!state.edits.length) { box.innerHTML = ''; shownChanges = 0; return; }
+  box.innerHTML = '<div class="changes-tray"><span class="changes-label"><b>Changes</b><small>click to remove</small></span><div class="changes-chips">' + state.edits.map((e, i) => {
     const icon = e.demolish ? 'ph-bulldozer' : CHANGE_ICONS[e.type];
     const dot = e.type === 'surface' ? `<span class="dot" style="background:${SURFACE_COLORS[e.surface]}"></span>` : '';
     return `<button class="chip${i >= shownChanges ? ' new' : ''}" data-i="${i}" title="${describe(e)}. Click to remove." aria-label="Remove: ${describe(e)}">`
       + `<i class="ph ${icon} kind"></i><i class="ph ph-trash bin"></i>${dot}</button>`;
-  }).join('');
+  }).join('') + '</div></div>';
   shownChanges = state.edits.length;
-  box.scrollLeft = box.scrollWidth;
+  const chips = box.querySelector('.changes-chips');
+  chips.scrollLeft = chips.scrollWidth;  // newest change in view; the label stays put
 }
 
 $('changes').addEventListener('click', (ev) => {

@@ -75,11 +75,19 @@ header {
 .actions { display: flex; gap: 6px; margin-left: auto; flex: none; }
 
 /* your changes: one icon per edit, hover turns it into a red bin */
-.changes { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.changes { display: flex; align-items: center; flex: 1; min-width: 0; }
 .changes > :first-child { margin-left: auto; }  /* right-aligned, but still scrollable when full */
+.changes-tray {
+  display: flex; align-items: center; min-width: 0; max-width: 100%; padding: 3px 3px 3px 10px;
+  border-radius: calc(var(--r-ctl) + 3px); background: var(--sunken);
+}
+.changes-label { display: flex; flex-direction: column; line-height: 1.1; margin-right: 8px; white-space: nowrap; }
+.changes-chips { display: flex; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.changes-label b { font-size: 12px; font-weight: 600; }
+.changes-label small { font-size: 11px; color: var(--muted); }
 .changes .chip {
   position: relative; width: 30px; height: 30px; padding: 0; flex: none; justify-content: center; overflow: hidden;
-  border-radius: var(--r-ctl); background: var(--sunken); border-color: transparent; color: var(--ink);
+  border-radius: var(--r-ctl); background: var(--panel); border-color: var(--line); color: var(--ink);
 }
 .changes .chip i { position: absolute; transition: transform .18s ease, opacity .18s ease; }
 .changes .chip .bin { color: #fff; opacity: 0; transform: translateY(12px) scale(.6); }
@@ -208,11 +216,11 @@ footer {
 #live { height: 30px; padding: 0 10px; }
 #live.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 
-.result { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; min-width: 0; padding-left: 24px; border-left: 1px solid var(--line); }
+.result { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; min-width: 0; padding-left: 24px; border-left: 1px solid var(--line); }
 .result .big { font-size: 30px; font-weight: 700; letter-spacing: -.02em; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .result .big.cool { color: var(--cool); }
 .result .big.hot { color: var(--hot); }
-.result .lines { display: flex; flex-direction: column; min-width: 0; flex: 1 1 220px; }
+.result .lines { display: flex; flex-direction: column; min-width: 0; flex: 0 1 auto; }
 .result .lines strong { font-weight: 600; }
 .result .lines span { color: var(--muted); font-size: 13px; }
 .result .hot { color: var(--hot); }
@@ -222,7 +230,7 @@ footer {
 .result .lines b { white-space: nowrap; }
 .result .lines b i { font-size: .95em; vertical-align: -1px; }
 .result .compare {
-  display: flex; align-items: center; gap: 12px; margin-left: auto; padding: 6px 14px; flex: none;
+  display: flex; align-items: center; gap: 12px; padding: 6px 14px; flex: none;
   border-radius: var(--r-ctl); background: var(--sunken);
 }
 .result .compare div { display: flex; flex-direction: column; line-height: 1.15; }
@@ -237,7 +245,6 @@ footer {
 @media (max-width: 1440px) {  /* weather line moves under the bar so the result has room */
   footer { grid-template-columns: auto minmax(0, 1fr); row-gap: 4px; }
   .status { grid-column: 1 / -1; text-align: left; }
-  .result .lines { flex-basis: 200px; }
 }
 @media (max-width: 1320px) {
   .tools button:not(.active) span { display: none; }  /* icons only, the active tool keeps its label */
@@ -255,6 +262,8 @@ footer {
   .toolbar { order: 3; flex-basis: 100%; flex-wrap: wrap; gap: 8px; }
   .changes { order: 4; flex-basis: 100%; justify-content: flex-start; }
   .changes:empty { display: none; }
+  .changes > :first-child { margin-left: 0; }
+  .changes-label small { display: none; }
   .tools { overflow-x: auto; max-width: 100%; scrollbar-width: none; }
   .view-tabs { display: flex; gap: 2px; padding: 3px; margin: 8px 12px 0; background: var(--sunken); border-radius: calc(var(--r-ctl) + 3px); }
   .view-tabs button { flex: 1; justify-content: center; height: 32px; border-color: transparent; background: transparent; color: var(--muted); }
@@ -266,8 +275,7 @@ footer {
   .time { flex-wrap: wrap; gap: 8px 16px; }
   #hour { width: 150px; }
   .result { border-left: 0; padding-left: 0; row-gap: 8px; }
-  .result .lines { flex-basis: 180px; }
-  .result .compare { margin-left: 0; }
+  .result .lines { flex: 1 1 180px; }
   .result .big { font-size: 26px; }
 }
 
