@@ -37,8 +37,8 @@ const EMPTY = { type: 'FeatureCollection', features: [] };
 const BLANK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
 // the data behind the heat map (licences in backend/data/LICENSES.md)
-const DATA_CREDITS = 'Tree canopy © NSW DPHI (CC BY-NC-ND 4.0) · Buildings © OpenStreetMap contributors · '
-  + 'Terrain © Copernicus DEM · Weather <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> · Heat model SOLWEIG';
+const DATA_CREDITS = 'Trees © NSW DPHI · Terrain © Copernicus · Weather © Open-Meteo · '
+  + '<a href="https://github.com/BaoAL31/climate-tion-heatmap/blob/main/backend/data/LICENSES.md" target="_blank" rel="noopener">Sources</a>';
 
 function makeMap(container, base, baseDim) {
   return new maplibregl.Map({
@@ -61,6 +61,8 @@ const mapReal = makeMap('mapReal', IMAGERY, false);
 const mapHeat = makeMap('mapHeat', OSM, true);
 const maps = [mapReal, mapHeat];
 const mapsReady = Promise.all(maps.map((m) => new Promise((res) => m.once('load', res))));
+// start with the credits folded behind the (i) button so they don't cover the maps
+mapsReady.then(() => maps.forEach((m) => m.getContainer().querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show')));
 
 // keep the two cameras in sync
 let syncing = false;
