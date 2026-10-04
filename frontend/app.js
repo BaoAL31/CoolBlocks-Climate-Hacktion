@@ -608,10 +608,12 @@ function render() {
   const card = $('card');
   if (res) {
     const d = res.utci_change_mean, best = res.utci_change_min, worst = res.utci_change_max;
-    const cooler = d <= 0;
-    card.innerHTML = `<div class="big ${cooler ? 'cool' : 'hot'}">${cooler ? '−' : '+'}${Math.abs(d).toFixed(1)} °C</div>`
-      + `<div class="lines"><strong>${cooler ? 'Cooler' : 'Hotter'} near your changes at ${fmtHour(res.hour)}</strong>`
-      + `<span>Best spot ${best.toFixed(1)} °C${worst > 0.5 ? `, some spots <b class="hot">+${worst.toFixed(1)} °C</b>` : ''}. Air ${res.air_temp.toFixed(0)} °C.</span></div>`;
+    const cooler = best < 0;  // the big number is the best spot, or the hottest one if nothing got cooler
+    const top = cooler ? best : worst;
+    const avg = `${d <= 0 ? '−' : '+'}${Math.abs(d).toFixed(1)} °C`;
+    card.innerHTML = `<div class="big ${cooler ? 'cool' : 'hot'}">${cooler ? '−' : '+'}${Math.abs(top).toFixed(1)} °C</div>`
+      + `<div class="lines"><strong>${cooler ? 'Coolest' : 'Hottest'} spot near your changes at ${fmtHour(res.hour)}</strong>`
+      + `<span>Average ${avg} nearby${cooler && worst > 0.5 ? `, some spots <b class="hot">+${worst.toFixed(1)} °C</b>` : ''}. Air ${res.air_temp.toFixed(0)} °C.</span></div>`;
   } else if (base) {
     card.innerHTML = `<div class="big">${base.utci_ground_mean.toFixed(0)} °C</div>`
       + `<div class="lines"><strong>How hot the streets feel at ${fmtHour(base.hour)}</strong>`
