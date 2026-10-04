@@ -208,23 +208,37 @@ footer {
 #live { height: 30px; padding: 0 10px; }
 #live.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 
-.result { display: flex; align-items: center; gap: 14px; min-width: 0; padding-left: 24px; border-left: 1px solid var(--line); }
+.result { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; min-width: 0; padding-left: 24px; border-left: 1px solid var(--line); }
 .result .big { font-size: 30px; font-weight: 700; letter-spacing: -.02em; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .result .big.cool { color: var(--cool); }
 .result .big.hot { color: var(--hot); }
-.result .lines { display: flex; flex-direction: column; min-width: 0; }
+.result .lines { display: flex; flex-direction: column; min-width: 0; flex: 1 1 220px; }
 .result .lines strong { font-weight: 600; }
 .result .lines span { color: var(--muted); font-size: 13px; }
 .result .hot { color: var(--hot); }
 .result .cool { color: var(--cool); }
 .result .big { display: flex; align-items: center; gap: 2px; }
 .result .big i { font-size: .9em; }
+.result .lines b { white-space: nowrap; }
 .result .lines b i { font-size: .95em; vertical-align: -1px; }
+.result .compare {
+  display: flex; align-items: center; gap: 12px; margin-left: auto; padding: 6px 14px; flex: none;
+  border-radius: var(--r-ctl); background: var(--sunken);
+}
+.result .compare div { display: flex; flex-direction: column; line-height: 1.15; }
+.result .compare small { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.result .compare b { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.result .compare > i { color: var(--muted); font-size: 18px; }
 .status { color: var(--muted); font-size: 12px; text-align: right; }
 .status .warn { color: var(--hot); }
 
 /* ---------------------------------------------------------------- smaller screens */
 @media (max-width: 1400px) { .brand .tagline { display: none; } #example span { display: none; } #example { width: 34px; padding: 0; justify-content: center; } }
+@media (max-width: 1440px) {  /* weather line moves under the bar so the result has room */
+  footer { grid-template-columns: auto minmax(0, 1fr); row-gap: 4px; }
+  .status { grid-column: 1 / -1; text-align: left; }
+  .result .lines { flex-basis: 200px; }
+}
 @media (max-width: 1320px) {
   .tools button:not(.active) span { display: none; }  /* icons only, the active tool keeps its label */
   .pane-title small { display: none; }
@@ -251,7 +265,9 @@ footer {
   footer { grid-template-columns: 1fr; gap: 10px; padding: 10px 12px; }
   .time { flex-wrap: wrap; gap: 8px 16px; }
   #hour { width: 150px; }
-  .result { border-left: 0; padding-left: 0; }
+  .result { border-left: 0; padding-left: 0; row-gap: 8px; }
+  .result .lines { flex-basis: 180px; }
+  .result .compare { margin-left: 0; }
   .result .big { font-size: 26px; }
 }
 

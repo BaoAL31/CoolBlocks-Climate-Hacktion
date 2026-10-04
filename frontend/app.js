@@ -616,8 +616,11 @@ function render() {
     card.innerHTML = `<div class="big ${cooler ? 'cool' : 'hot'}" aria-label="${Math.abs(top).toFixed(1)} degrees ${cooler ? 'cooler' : 'hotter'}">`
       + `${arrow(!cooler)}${Math.abs(top).toFixed(1)} °C</div>`
       + `<div class="lines"><strong>${cooler ? 'Coolest' : 'Hottest'} spot near your changes at ${fmtHour(res.hour)}</strong>`
-      + `<span>${was != null ? `Feels like ${was.toFixed(1)} °C before, <b class="${cooler ? 'cool' : 'hot'}">${now.toFixed(1)} °C after</b>. ` : ''}`
-      + `${avg} on average nearby${cooler && worst > 0.5 ? `, some spots <b class="hot">${arrow(true)}${worst.toFixed(1)} °C hotter</b>` : ''}.</span></div>`;
+      + `<span>${avg} on average nearby${cooler && worst > 0.5 ? `, some spots <b class="hot">${arrow(true)}${worst.toFixed(1)} °C hotter</b>` : ''}.</span></div>`
+      // "feels like" at that spot before and after, so the change has something to compare against
+      + (was != null ? `<div class="compare" aria-label="Feels like ${was.toFixed(1)} degrees before, ${now.toFixed(1)} after">`
+        + `<div><small>Before</small><b>${was.toFixed(1)} °C</b></div><i class="ph ph-arrow-right" aria-hidden="true"></i>`
+        + `<div><small>After</small><b class="${cooler ? 'cool' : 'hot'}">${now.toFixed(1)} °C</b></div></div>` : '');
   } else if (base) {
     card.innerHTML = `<div class="big">${base.utci_ground_mean.toFixed(0)} °C</div>`
       + `<div class="lines"><strong>How hot the streets feel at ${fmtHour(base.hour)}</strong>`
