@@ -561,8 +561,14 @@ $('date').max = localDay(new Date());
 $('date').onchange = (ev) => {
   const v = ev.target.value;
   if (v && (v < ev.target.min || v > ev.target.max)) { ev.target.value = state.date; return; }
+  if (v === localDay(new Date())) { goLive(); return; }  // today is the same as Live
   state.date = v; state.result = null; loadBaseline();
 };
+function goLive() {
+  $('date').value = '';
+  if (!state.date) return;  // already live, nothing to reload
+  state.date = ''; state.result = null; loadBaseline();
+}
 $('live').onclick = () => { $('date').value = ''; state.date = ''; state.result = null; loadBaseline(); };
 document.querySelectorAll('input[name=heatMode]').forEach((r) => r.addEventListener('change', (ev) => { state.heatMode = ev.target.value; render(); }));
 
@@ -628,7 +634,7 @@ const fmtDate = (d) => new Date(`${d}T00:00`).toLocaleDateString('en-AU', { day:
 function showStatus() {
   const src = state.baseline?.weather_source;
   const when = state.date ? fmtDate(state.date) : 'live';
-  const weather = src === 'fallback hot day' ? 'built-in hot day (no internet weather)' : `${when}, from Open-Meteo`;
+  const weather = src === 'fallback hot day' ? 'made-up hot day (no weather data for this day)' : `${when}, from Open-Meteo`;
   $('status').innerHTML = `Weather: ${weather}`
     + (state.area?.source === 'synthetic demo' ? '<br><span class="warn">Demo area with made-up buildings</span>' : '');
 }

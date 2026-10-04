@@ -10,6 +10,7 @@ Usage:
     weather = to_solweig(rows, hours=range(9, 19))     # 9am-6pm, for the time slider
     location = solweig.Location(latitude=LAT, longitude=LON, utc_offset=utc_offset)
 """
+from datetime import date as Date
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -27,7 +28,12 @@ def fetch_hourly(date: str | None = None):
     if date is None:
         url = "https://api.open-meteo.com/v1/forecast"
         params.update(past_days=1, forecast_days=1)
-    else:  # past days: ERA5-based archive (a few days' delay; use the forecast API for the last week)
+    elif (datetime.now(TZ).date() - Date.fromisoformat(date)).days <= 60:
+        # the ERA5 archive runs about 5 days behind, so recent days (and today) come from the forecast API,
+        # which keeps the last ~3 months
+        url = "https://api.open-meteo.com/v1/forecast"
+        params.update(start_date=date, end_date=date)
+    else:  # older days: ERA5-based archive (back to 1940)
         url = "https://archive-api.open-meteo.com/v1/archive"
         params.update(start_date=date, end_date=date)
     h = requests.get(url, params=params, timeout=20).json()["hourly"]
