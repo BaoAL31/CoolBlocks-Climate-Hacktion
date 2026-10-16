@@ -1,0 +1,18 @@
+# Runs CoolBlocks on a server, reachable at coolblocks.cool through a Cloudflare tunnel.
+# Put the tunnel token in a file called .env next to this one (see .env.example), then:
+#   docker compose up -d --build
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      COOLBLOCKS_WARMUP: "1"
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    depends_on:
+      - app

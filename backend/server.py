@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import threading
+import time
 import shutil
 import tempfile
 import uuid
@@ -356,11 +357,15 @@ def _warm_up():
         return
 
     def run():
-        for day in ("2025-12-19", None):
-            try:
-                _baseline_once(day)
-            except Exception as e:  # never stop the server over a warm-up
-                print(f"coolblocks: warm-up for {day or 'today'} failed ({e})")
+        days = ("2025-12-19", None)
+        while True:  # keep going so "today" is ready again soon after midnight
+            for day in days:
+                try:
+                    _baseline_once(day)
+                except Exception as e:  # never stop the server over a warm-up
+                    print(f"coolblocks: warm-up for {day or 'today'} failed ({e})")
+            days = (None,)
+            time.sleep(15 * 60)
 
     threading.Thread(target=run, daemon=True).start()
 
@@ -433,7 +438,8 @@ _SIMS: dict = {}  # sim_id -> patch results of a recent /simulate, for /point af
 
 
 @functools.lru_cache(maxsize=4)
-def _baseline(day: str | None, hours: tuple[int, ...]):
+def _baseline(day: str | None, hours: tuple[int, ...], today: str = ""):
+    # "today" is only part of the cache key, so the live map is worked out again each new day
     ws, offset, src = get_weather(day, list(hours))
     res = _run(f"baseline_{day or 'live'}", AREA.dsm, AREA.dem, AREA.cdsm, AREA.lc, ws, _location(offset))
     roofs = AREA.lc == 2
@@ -463,7 +469,8 @@ def baseline(date: str | None = None):
 def _baseline_once(day: str | None):
     """Two people opening the app together wait for one heat map instead of both computing it."""
     with _BASELINE_LOCK:
-        return _baseline(day, tuple(DEFAULT_HOURS))
+        today = "" if day else datetime.now(live_weather.TZ).date().isoformat()
+        return _baseline(day, tuple(DEFAULT_HOURS), today)
 
 
 @app.post("/api/simulate")

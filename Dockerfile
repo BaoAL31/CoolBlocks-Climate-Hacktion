@@ -1,5 +1,8 @@
-# Runs CoolBlocks on Hugging Face Spaces (or any Docker host). Open port 7860.
+# Runs CoolBlocks on any Docker host (see docker-compose.yml). Listens on port 7860.
 FROM python:3.11-slim
+
+# rasterio needs libexpat, which the slim image no longer ships
+RUN apt-get update && apt-get install -y --no-install-recommends libexpat1 && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -u 1000 user
 WORKDIR /app
