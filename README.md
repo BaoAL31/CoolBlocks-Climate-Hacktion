@@ -6,7 +6,7 @@
 
 **Plant a tree, change a pavement or reshape a building on a 3D map of the University of Sydney, and see how much cooler (or hotter) the street would feel, hour by hour.**
 
-Built for **Climate Hack-tion 2026** · *Build for 2035* · COP31 priority: **Resilient Cities & Buildings** (helping cities cope with heatwaves).
+Built for **Climate Hack-tion 2026** · *Build for 2035* by the European Union · COP31 priority: **Resilient Cities & Buildings** (helping cities cope with heatwaves).
 
 https://github.com/user-attachments/assets/0e6cd2a0-587b-4e07-84b8-1ed81689efab
 
